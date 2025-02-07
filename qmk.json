@@ -2,6 +2,7 @@
     "userspace_version": "1.0",
     "build_targets": [
         ["bastardkb/dilemma/3x5_2", "menk"],
-        ["mechboards/sofle/pro", "bingu"]
+        ["mechboards/sofle/pro", "bingu"],
+        ["bastardkb/dilemma/4x6_4_procyon", "menk"]
     ]
 }
