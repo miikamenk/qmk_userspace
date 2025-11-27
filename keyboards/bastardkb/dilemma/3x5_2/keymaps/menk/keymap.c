@@ -229,8 +229,6 @@ layer_state_t layer_state_set_user(layer_state_t state) {
 #    endif // DILEMMA_AUTO_SNIPING_ON_LAYER
 #endif     // POINTING_DEVICE_ENABLE
 
-#ifdef OLED_DRIVER_ENABLE
-
 static const char *oled_get_layer_name(void) {
     switch (get_highest_layer(layer_state)) {
         case 0:
@@ -261,16 +259,7 @@ static void oled_draw_header(void) {
     oled_write_P(PSTR("----------------"), false);
 }
 
-bool oled_task_user(void) {
-#    ifdef SPLIT_KEYBOARD
-    if (!is_keyboard_master()) {
-        oled_clear();
-        oled_set_cursor(0, 0);
-        oled_write_P(PSTR("Slave"), false);
-        return false;
-    }
-#    endif
-
+bool oled_task_keymap(void) {
     oled_clear();
 
     oled_draw_header();
@@ -358,5 +347,3 @@ bool oled_task_user(void) {
 
     return false;
 }
-
-#endif // OLED_DRIVER_ENABLE
