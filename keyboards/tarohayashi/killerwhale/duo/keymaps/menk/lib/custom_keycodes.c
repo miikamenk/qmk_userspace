@@ -1,50 +1,28 @@
 // Copyright 2021 Hayashi (@w_vwbw)
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "lib/add_keycodes.h"
+#include "custom_keycodes.h"
 #include "os_detection.h"
 #include "lib/common_killerwhale.h"
-#include "lib/add_oled.h"
+#include "custom_oled.h"
 #include "transactions.h"
 
-bool oled_force = false;
+oled_state_t master_state = STATE_INFO;
+oled_state_t slave_state  = STATE_ANIMONE;
 
-typedef struct {
-    uint8_t force_state; // 0 for false, 1 for true
-} oled_sync_data_t;
-
-void oled_sync_slave_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
-    // if buffer length matches size of data structure (simple error checking)
-    if (in_buflen == sizeof(oled_force)) {
+void oled_state_slave_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
+    if (in_buflen == sizeof(slave_state)) {
         // copy data from master into local data structure
-        memcpy(&oled_force, in_data, in_buflen);
+        memcpy(&slave_state, in_data, in_buflen);
+
+        oled_clear();
+        oled_interrupt(OLED_MOD);
     }
 }
 
 void keyboard_post_init_user(void) {
     // register sync handler
-    transaction_register_rpc(OLEDFORCE_SYNC, oled_sync_slave_handler);
-}
-
-void housekeeping_task_user(void) {
-    if (is_keyboard_master()) {
-        static uint32_t last_sync  = 0;
-        static bool     needs_sync = false;
-
-        if (timer_elapsed32(last_sync) > 250) {
-            needs_sync = true;
-        }
-
-        // if it needs syncing:
-        if (needs_sync) {
-            // send user_data stuct over to slave
-            if (transaction_rpc_send(OLEDFORCE_SYNC, sizeof(oled_force), &oled_force)) {
-                // reset sync checks
-                last_sync  = timer_read32();
-                needs_sync = false;
-            }
-        }
-    }
+    transaction_register_rpc(RPC_TRANSACTION_OLED_STATE, oled_state_slave_handler);
 }
 
 uint16_t startup_timer;
@@ -425,21 +403,24 @@ bool     process_record_addedkeycodes(uint16_t keycode, keyrecord_t *record) {
             break;
         case OLED_MOD:
             if (record->event.pressed) {
-                if (!kw_config.oled_mode && !oled_force) {
-                    // state 0 -> 1
-                    kw_config.oled_mode = true;
-                    oled_force          = false;
-                } else if (kw_config.oled_mode && !oled_force) {
-                    // state 1 -> 2
-                    kw_config.oled_mode = true;
-                    oled_force          = true;
-                } else {
-                    // state 2 or any other -> 0
-                    kw_config.oled_mode = false;
-                    oled_force          = false;
+                master_state = (oled_state_t)(master_state + 1);
+
+                if (master_state > STATE_ANIMTWO) {
+                    master_state = STATE_OFF;
                 }
                 oled_clear();
                 oled_interrupt(keycode);
+            }
+            return false;
+            break;
+        case QK_USER_26:
+            if (record->event.pressed) {
+                slave_state = (oled_state_t)(slave_state + 1);
+
+                if (slave_state > STATE_ANIMTWO) {
+                    slave_state = STATE_OFF;
+                }
+                transaction_rpc_send(RPC_TRANSACTION_OLED_STATE, sizeof(slave_state), &slave_state);
             }
             return false;
             break;

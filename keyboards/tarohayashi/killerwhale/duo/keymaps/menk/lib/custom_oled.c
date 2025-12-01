@@ -1,12 +1,11 @@
 // Copyright 2021 Hayashi (@w_vwbw)
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "lib/add_oled.h"
+#include "custom_oled.h"
 #include "os_detection.h"
 #include "lib/common_killerwhale.h"
 #include "lib/glcdfont.c"
-#include "lib/add_keycodes.h"
-#include "add_keycodes.h"
+#include "custom_keycodes.h"
 #include "moominhouse.h"
 
 uint8_t  pre_layer, cur_layer;
@@ -28,18 +27,13 @@ void oled_init_addedoled(void) {
 }
 
 // OLED表示
-bool oled_task_addedoled(void) {
+bool oled_task_user(void) {
+    bool master = is_keyboard_master();
     // 割り込み表示
-    if (oled_force || !is_keyboard_master()) {
-        oled_off();
-        // render_moominhouse(is_keyboard_master());
+    if ((master_state == STATE_ANIMONE && master) || (slave_state == STATE_ANIMONE && !master)) {
+        render_moominhouse(master);
     } else {
-        if (get_joystick_attached() && !is_keyboard_master()) {
-            oled_set_cursor(0, 2);
-            oled_write_P(PSTR("Please attach USB    "), false);
-            oled_set_cursor(0, 3);
-            oled_write_P(PSTR("     cable this side."), false);
-        } else if (interrupted) {
+        if (interrupted) {
             if (timer_elapsed(interrupted_time) < INTERRUPT_TIME) {
                 oled_set_cursor(0, 3);
                 switch (interrupt_type) {
@@ -230,35 +224,7 @@ bool oled_task_addedoled(void) {
                 interrupted = false;
             }
             // 切り替え表示
-        } else if (tempch && timer_elapsed(tempch_time) > TERM_TEMP) {
-            oled_set_cursor(0, 3);
-            switch (tempch_type) {
-                case MOD_SCRL:
-                case QK_USER_0:
-                case QK_USER_1:
-                case QK_USER_2:
-                case QK_USER_3:
-                    oled_write_P(PSTR("SCROLL MODE          "), false);
-                    break;
-                case QK_USER_4:
-                case QK_USER_5:
-                case QK_USER_6:
-                case QK_USER_7:
-                case QK_USER_8:
-                case QK_USER_9:
-                case QK_USER_10:
-                case QK_USER_11:
-                    oled_write_P(PSTR("SLOW MODE            "), false);
-                    break;
-                case QK_USER_12:
-                    oled_write_P(PSTR("CURSOR MODE          "), false);
-                    break;
-                case QK_USER_13:
-                    oled_write_P(PSTR("KEY INPUT MODE       "), false);
-                    break;
-            }
-            // レイヤー表示処理
-        } else if (kw_config.oled_mode) {
+        } else if ((master_state == STATE_LAYER && master) || (slave_state == STATE_LAYER && !master)) {
             oled_set_cursor(0, 0);
             cur_layer = get_highest_layer(layer_state);
             if (gpio_read_pin(GP10)) {
@@ -267,7 +233,7 @@ bool oled_task_addedoled(void) {
                 oled_write_raw_P(number[cur_layer], sizeof(number[cur_layer]));
             }
             // スタッツ表示処理
-        } else {
+        } else if ((master_state == STATE_INFO && master) || (slave_state == STATE_INFO && !master)) {
             oled_set_cursor(0, 0);
             oled_write_P(PSTR("SPD "), false);
             if (get_joystick_attached() == JOYSTICK_LEFT) {
@@ -353,38 +319,39 @@ bool oled_task_addedoled(void) {
             } else {
                 oled_write_P(PSTR("  KEY"), false);
             }
-        }
-        // 修飾キー表示処理
-        uint8_t mod_state = get_mods();
-        if (mod_state) {
-            oled_set_cursor(0, 3);
-            if (mod_state & MOD_MASK_SHIFT) {
-                oled_write_P(PSTR("SHIFT  "), false);
-            } else {
-                oled_write_P(PSTR("       "), false);
-            }
-            if (mod_state & MOD_MASK_CTRL) {
-                oled_write_P(PSTR("CTRL  "), false);
-            } else {
-                oled_write_P(PSTR("      "), false);
-            }
-            if (mod_state & MOD_MASK_ALT) {
-                if (detected_host_os() == OS_MACOS || detected_host_os() == OS_IOS) {
-                    oled_write_P(PSTR("OPT  "), false);
+
+            // 修飾キー表示処理
+            uint8_t mod_state = get_mods();
+            if (mod_state) {
+                oled_set_cursor(0, 3);
+                if (mod_state & MOD_MASK_SHIFT) {
+                    oled_write_P(PSTR("SHIFT  "), false);
                 } else {
-                    oled_write_P(PSTR("ALT  "), false);
+                    oled_write_P(PSTR("       "), false);
                 }
-            } else {
-                oled_write_P(PSTR("     "), false);
-            }
-            if (mod_state & MOD_MASK_GUI) {
-                if (detected_host_os() == OS_MACOS || detected_host_os() == OS_IOS) {
-                    oled_write_P(PSTR("CMD"), false);
+                if (mod_state & MOD_MASK_CTRL) {
+                    oled_write_P(PSTR("CTRL  "), false);
                 } else {
-                    oled_write_P(PSTR("WIN"), false);
+                    oled_write_P(PSTR("      "), false);
                 }
-            } else {
-                oled_write_P(PSTR("   "), false);
+                if (mod_state & MOD_MASK_ALT) {
+                    if (detected_host_os() == OS_MACOS || detected_host_os() == OS_IOS) {
+                        oled_write_P(PSTR("OPT  "), false);
+                    } else {
+                        oled_write_P(PSTR("ALT  "), false);
+                    }
+                } else {
+                    oled_write_P(PSTR("     "), false);
+                }
+                if (mod_state & MOD_MASK_GUI) {
+                    if (detected_host_os() == OS_MACOS || detected_host_os() == OS_IOS) {
+                        oled_write_P(PSTR("CMD"), false);
+                    } else {
+                        oled_write_P(PSTR("WIN"), false);
+                    }
+                } else {
+                    oled_write_P(PSTR("   "), false);
+                }
             }
         }
     }

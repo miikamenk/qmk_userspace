@@ -1,8 +1,8 @@
+VIA_ENABLE = yes
 ENCODER_MAP_ENABLE = yes
 
-
-SRC := $(filter-out keyboards/mechboards/common/display_oled.c,$(SRC))
-
-SRC += lib/add_keycodes.c
-SRC += lib/add_oled.c
+SRC += lib/common_killerwhale.c
+SRC += lib/custom_keycodes.c
+SRC += lib/add_rgblayers.c
+SRC += lib/custom_oled.c
 SRC += lib/moominhouse.c

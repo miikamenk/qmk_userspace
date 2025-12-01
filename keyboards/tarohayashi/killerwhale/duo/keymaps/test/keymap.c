@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include QMK_KEYBOARD_H
-#include "lib/custom_keycodes.h"
+#include "lib/add_keycodes.h"
 
-// clang-format off
 // レイヤー名
 enum layer_number {
     BASE = 0,
@@ -183,4 +182,3 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][2] = {
         ENCODER_CCW_CW(UG_HUEU, UG_HUED)
     },
 };
-// clang-format on

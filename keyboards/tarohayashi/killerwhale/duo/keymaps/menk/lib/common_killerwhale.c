@@ -691,13 +691,6 @@ oled_rotation_t oled_init_kb(oled_rotation_t rotation) {
 
     return oled_init_user(rotation);
 }
-// 実タスク
-bool oled_task_kb(void) {
-    // 追加OLEDタスク
-    oled_task_addedoled();
-
-    return oled_task_user();
-}
 
 /* 諸関数 */
 // モードチェンジ時端数削除
