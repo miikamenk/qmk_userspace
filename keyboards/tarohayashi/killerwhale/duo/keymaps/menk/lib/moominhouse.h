@@ -14,10 +14,8 @@
  * Simple cycle that changes global brightness and optionally shifts sun position.
  * Prefer values that are multiples of FRAME/NUMBER_OF_FRAMES for smoothness.
  */
-#    ifndef STATIC_DAY_NIGHT
-#        define DAY_NIGHT_CYCLE_FRAMES 240 // number of frames for a full day->night->day cycle
-#        define BLACK_FRAMES 2             // number of frames for a full day->night->day cycle
-#    endif
+#    define DAY_NIGHT_CYCLE_FRAMES 2400
+#    define BLACK_FRAMES 24
 #    define DAY_BRIGHTNESS_MIN 20  // 0-255 (ambient multiplier during night)
 #    define DAY_BRIGHTNESS_MAX 255 // 0-255 (ambient multiplier during day)
 #    define SUN_LINE 2             // line where the sun is drawn (if implemented)
@@ -72,7 +70,7 @@
 #    define FOG_RISE_SPEED_FRAMES 180  // frames between slight fog shifts
 #    define FOG_HORIZONTAL_VARIATION 8 // pixels of horizontal perlin-ish shift
 
-void render_moominhouse(bool master);
+void render_moominhouse(void);
 
 #    ifdef ENABLE_DAY_NIGHT
 void update_day_night(uint16_t frame_count);

@@ -36,18 +36,19 @@ uint8_t dpad_pressed_l, dpad_pressed_r;
 /* eeprom */
 // 初期化
 void eeconfig_init_kb(void) {
-    kw_config.spd_l      = SPD_DEFAULT_LEFT;
-    kw_config.spd_r      = SPD_DEFAULT_RIGHT;
-    kw_config.angle_l    = ANGLE_DEFAULT_LEFT;
-    kw_config.angle_r    = ANGLE_DEFAULT_RIGHT;
-    kw_config.pd_mode_l  = MODE_DEFAULT_LEFT;
-    kw_config.pd_mode_r  = MODE_DEFAULT_RIGHT;
-    kw_config.inv_l      = INVERT_LEFT_DEFAULT;
-    kw_config.inv_r      = INVERT_RIGHT_DEFAULT;
-    kw_config.inv_sc     = INVERT_SCROLL_DEFAULT;
-    kw_config.auto_mouse = AUTO_MOUSE_DEFAULT;
-    kw_config.rgb_layers = RGB_LAYER_DEFAULT;
-    kw_config.oled_mode  = OLED_DEFAULT;
+    kw_config.spd_l             = SPD_DEFAULT_LEFT;
+    kw_config.spd_r             = SPD_DEFAULT_RIGHT;
+    kw_config.angle_l           = ANGLE_DEFAULT_LEFT;
+    kw_config.angle_r           = ANGLE_DEFAULT_RIGHT;
+    kw_config.pd_mode_l         = MODE_DEFAULT_LEFT;
+    kw_config.pd_mode_r         = MODE_DEFAULT_RIGHT;
+    kw_config.inv_l             = INVERT_LEFT_DEFAULT;
+    kw_config.inv_r             = INVERT_RIGHT_DEFAULT;
+    kw_config.inv_sc            = INVERT_SCROLL_DEFAULT;
+    kw_config.auto_mouse        = AUTO_MOUSE_DEFAULT;
+    kw_config.rgb_layers        = RGB_LAYER_DEFAULT;
+    kw_config.oled_state_master = STATE_INFO;
+    kw_config.oled_state_slave  = STATE_ANIMONE;
     eeconfig_update_kb(kw_config.raw);
 
     eeconfig_init_user();

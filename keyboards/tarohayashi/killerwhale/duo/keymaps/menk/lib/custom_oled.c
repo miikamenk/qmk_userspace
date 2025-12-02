@@ -3,8 +3,8 @@
 
 #include "custom_oled.h"
 #include "os_detection.h"
-#include "lib/common_killerwhale.h"
-#include "lib/glcdfont.c"
+#include "common_killerwhale.h"
+#include "glcdfont.c"
 #include "custom_keycodes.h"
 #include "moominhouse.h"
 
@@ -30,8 +30,8 @@ void oled_init_addedoled(void) {
 bool oled_task_user(void) {
     bool master = is_keyboard_master();
     // 割り込み表示
-    if ((master_state == STATE_ANIMONE && master) || (slave_state == STATE_ANIMONE && !master)) {
-        render_moominhouse(master);
+    if ((kw_config.oled_state_master == STATE_ANIMONE && master) || (kw_config.oled_state_slave == STATE_ANIMONE && !master)) {
+        render_moominhouse();
     } else {
         if (interrupted) {
             if (timer_elapsed(interrupted_time) < INTERRUPT_TIME) {
@@ -184,11 +184,7 @@ bool oled_task_user(void) {
                         }
                         break;
                     case OLED_MOD:
-                        if (kw_config.oled_mode) {
-                            oled_write_P(PSTR("SHOW LAYER           "), false);
-                        } else {
-                            oled_write_P(PSTR("SHOW STATS           "), false);
-                        }
+                        oled_write_P(PSTR("UPDATE LAYER         "), false);
                         break;
                     case QK_USER_14:
                         if (get_dpad_exclusion()) {
@@ -224,7 +220,7 @@ bool oled_task_user(void) {
                 interrupted = false;
             }
             // 切り替え表示
-        } else if ((master_state == STATE_LAYER && master) || (slave_state == STATE_LAYER && !master)) {
+        } else if ((kw_config.oled_state_master == STATE_LAYER && master) || (kw_config.oled_state_slave == STATE_LAYER && !master)) {
             oled_set_cursor(0, 0);
             cur_layer = get_highest_layer(layer_state);
             if (gpio_read_pin(GP10)) {
@@ -233,7 +229,7 @@ bool oled_task_user(void) {
                 oled_write_raw_P(number[cur_layer], sizeof(number[cur_layer]));
             }
             // スタッツ表示処理
-        } else if ((master_state == STATE_INFO && master) || (slave_state == STATE_INFO && !master)) {
+        } else if ((kw_config.oled_state_master == STATE_INFO && master) || (kw_config.oled_state_slave == STATE_INFO && !master)) {
             oled_set_cursor(0, 0);
             oled_write_P(PSTR("SPD "), false);
             if (get_joystick_attached() == JOYSTICK_LEFT) {

@@ -3,6 +3,12 @@
 
 #include QMK_KEYBOARD_H
 #include "lib/custom_keycodes.h"
+#include "transactions.h"
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include "timer.h"
+#include "oled_driver.h" // adjust if your project uses a different oled header
 
 // clang-format off
 // レイヤー名

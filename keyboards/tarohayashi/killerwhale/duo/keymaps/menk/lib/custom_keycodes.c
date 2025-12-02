@@ -5,25 +5,6 @@
 #include "os_detection.h"
 #include "lib/common_killerwhale.h"
 #include "custom_oled.h"
-#include "transactions.h"
-
-oled_state_t master_state = STATE_INFO;
-oled_state_t slave_state  = STATE_ANIMONE;
-
-void oled_state_slave_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
-    if (in_buflen == sizeof(slave_state)) {
-        // copy data from master into local data structure
-        memcpy(&slave_state, in_data, in_buflen);
-
-        oled_clear();
-        oled_interrupt(OLED_MOD);
-    }
-}
-
-void keyboard_post_init_user(void) {
-    // register sync handler
-    transaction_register_rpc(RPC_TRANSACTION_OLED_STATE, oled_state_slave_handler);
-}
 
 uint16_t startup_timer;
 bool     process_record_addedkeycodes(uint16_t keycode, keyrecord_t *record) {
@@ -403,24 +384,33 @@ bool     process_record_addedkeycodes(uint16_t keycode, keyrecord_t *record) {
             break;
         case OLED_MOD:
             if (record->event.pressed) {
-                master_state = (oled_state_t)(master_state + 1);
+                kw_config.oled_state_master++;
 
-                if (master_state > STATE_ANIMTWO) {
-                    master_state = STATE_OFF;
+                if (kw_config.oled_state_master > 4) {
+                    kw_config.oled_state_master = 0;
+                }
+
+                kw_config.oled_state_slave++;
+
+                if (kw_config.oled_state_slave > 4) {
+                    kw_config.oled_state_slave = 0;
                 }
                 oled_clear();
+                eeconfig_update_kb(kw_config.raw);
                 oled_interrupt(keycode);
             }
             return false;
             break;
         case QK_USER_26:
             if (record->event.pressed) {
-                slave_state = (oled_state_t)(slave_state + 1);
+                kw_config.oled_state_slave++;
 
-                if (slave_state > STATE_ANIMTWO) {
-                    slave_state = STATE_OFF;
+                if (kw_config.oled_state_slave > 4) {
+                    kw_config.oled_state_slave = 0;
                 }
-                transaction_rpc_send(RPC_TRANSACTION_OLED_STATE, sizeof(slave_state), &slave_state);
+                oled_clear();
+                eeconfig_update_kb(kw_config.raw);
+                oled_interrupt(keycode);
             }
             return false;
             break;
