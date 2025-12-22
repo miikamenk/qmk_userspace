@@ -17,6 +17,11 @@
  */
 #pragma once
 
+#define DEBUG_MATRIX_SCAN_RATE
+#define SERIAL_DEBUG
+#define QUANTUM_PAINTER_DEBUG
+#define QUANTUM_PAINTER_DEBUG_ENABLE_FLUSH_TASK_OUTPUT
+
 #define DYNAMIC_KEYMAP_LAYER_COUNT 8
 #define SPLIT_LAYER_STATE_ENABLE
 #define SPLIT_LED_STATE_ENABLE
@@ -25,7 +30,7 @@
 
 #define SPI_SCK_PIN GP22
 #define SPI_MOSI_PIN GP23
-#define SPI_MISO_PIN NO_PIN // Unused
+#define SPI_MISO_PIN GP18 // Unused
 #define LCD_RST_PIN GP13
 #define LCD_DC_PIN GP11
 #define LCD_CS_PIN GP12
@@ -41,7 +46,7 @@
 #define LCD_WAIT_TIME 250
 #define LCD_ROTATION QP_ROTATION_0
 #define LCD_OFFSET_X 0
-#define LCD_OFFSET_Y 20
+#define LCD_OFFSET_Y 0
 #define LCD_WIDTH 240 // Set according to your display specs
 #define LCD_HEIGHT 320 // Set according to your display specs
 #define SPI_MODE 0 // Set according to your display specs

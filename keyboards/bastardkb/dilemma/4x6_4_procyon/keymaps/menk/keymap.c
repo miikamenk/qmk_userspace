@@ -127,6 +127,8 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 #ifdef QUANTUM_PAINTER_ENABLE
 #    include "qp.h"
 #    include "qp_comms.h"
+#    include "print.h"
+#    include "gpio.h"
 
 #    include "color.h"
 
@@ -134,33 +136,34 @@ painter_device_t lcd;
 #endif // QUANTUM_PAINTER_ENABLE
 
 void keyboard_post_init_keymap(void) {
+    debug_enable = true;
 #ifdef QUANTUM_PAINTER_ENABLE
     if (is_keyboard_left()) {
         wait_ms(LCD_WAIT_TIME);
+        //gpio_set_pin_output(LCD_RST_PIN);
+        //gpio_write_pin_low(LCD_RST_PIN);
+        //wait_ms(20);
+        //gpio_write_pin_high(LCD_RST_PIN);
+        //wait_ms(150);
 
-        lcd = qp_ili9341_make_spi_device(LCD_HEIGHT, LCD_WIDTH, LCD_CS_PIN, LCD_DC_PIN, LCD_RST_PIN, LCD_SPI_DIVISOR, SPI_MODE);
+        lcd = qp_ili9341_make_spi_device(LCD_WIDTH, LCD_HEIGHT, LCD_CS_PIN, LCD_DC_PIN, LCD_RST_PIN, LCD_SPI_DIVISOR, SPI_MODE);
         qp_init(lcd, LCD_ROTATION);
+        print(lcd);
+        qp_power(lcd, true);
+        qp_clear(lcd);
 
         // Display offset
-        qp_set_viewport_offsets(lcd, LCD_OFFSET_X, LCD_OFFSET_Y);
+        //qp_set_viewport_offsets(lcd, LCD_OFFSET_X, LCD_OFFSET_Y);
 
         // Power on display, fill with white
-        qp_power(lcd, 1);
-        qp_rect(lcd, 0, 0, 300, 300, HSV_BLACK, 1);
+        qp_rect(lcd, 0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1, HSV_BLUE, true);
         qp_flush(lcd);
     }
 #endif // QUANTUM_PAINTER_ENABLE
 }
 void housekeeping_task_user(void) {
 #ifdef QUANTUM_PAINTER_ENABLE
-    static uint32_t last_draw = 0;
-    if (timer_elapsed32(last_draw) > 33) { // Throttle to 30fps
-        last_draw = timer_read32();
-        // Draw a 240px high vertical rainbow line on X=0:
-        for (int i = 0; i < 99; ++i) {
-            qp_setpixel(lcd, 40, i, i, 255, 255);
-        }
-        qp_flush(lcd);
-    }
+    qp_setpixel(lcd, 0, 0, 255, 255, 255);
+    qp_flush(lcd);
 #endif // QUANTUM_PAINTER_ENABLE
 }
