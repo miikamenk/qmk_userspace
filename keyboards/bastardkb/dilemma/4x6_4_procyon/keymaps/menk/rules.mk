@@ -1,0 +1,7 @@
+VIA_ENABLE = yes
+ENCODER_MAP_ENABLE = yes
+
+QUANTUM_PAINTER_ENABLE = yes
+QUANTUM_PAINTER_DRIVERS += ili9341_spi
+
+SRC += bkb_logo_mod.qgf.c
