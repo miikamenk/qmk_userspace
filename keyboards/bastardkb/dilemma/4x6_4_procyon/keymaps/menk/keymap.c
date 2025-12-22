@@ -126,25 +126,41 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 
 #ifdef QUANTUM_PAINTER_ENABLE
 #    include "qp.h"
-#    include "bkb_logo_mod.qgf.h"
-#    include "gpio.h"
+#    include "qp_comms.h"
 
-static painter_device_t       display;
-static painter_image_handle_t my_image;
+#    include "color.h"
+
+painter_device_t lcd;
 #endif // QUANTUM_PAINTER_ENABLE
 
 void keyboard_post_init_keymap(void) {
 #ifdef QUANTUM_PAINTER_ENABLE
     if (is_keyboard_left()) {
-    gpio_set_pin_output(GP18);
-    gpio_write_pin_high(GP18);
-        display = qp_ili9341_make_spi_device(240, 320, DISPLAY_CS_PIN, DISPLAY_DC_PIN, DISPLAY_RST_PIN, 4, 0);
+        wait_ms(LCD_WAIT_TIME);
 
-        qp_init(display, QP_ROTATION_0);
-        qp_clear(display);
-        my_image = qp_load_image_mem(gfx_bkb_logo_mod);
-        qp_drawimage(display, 0, 0, my_image);
-        qp_flush(display);
+        lcd = qp_ili9341_make_spi_device(LCD_HEIGHT, LCD_WIDTH, LCD_CS_PIN, LCD_DC_PIN, LCD_RST_PIN, LCD_SPI_DIVISOR, SPI_MODE);
+        qp_init(lcd, LCD_ROTATION);
+
+        // Display offset
+        qp_set_viewport_offsets(lcd, LCD_OFFSET_X, LCD_OFFSET_Y);
+
+        // Power on display, fill with white
+        qp_power(lcd, 1);
+        qp_rect(lcd, 0, 0, 300, 300, HSV_BLACK, 1);
+        qp_flush(lcd);
+    }
+#endif // QUANTUM_PAINTER_ENABLE
+}
+void housekeeping_task_user(void) {
+#ifdef QUANTUM_PAINTER_ENABLE
+    static uint32_t last_draw = 0;
+    if (timer_elapsed32(last_draw) > 33) { // Throttle to 30fps
+        last_draw = timer_read32();
+        // Draw a 240px high vertical rainbow line on X=0:
+        for (int i = 0; i < 99; ++i) {
+            qp_setpixel(lcd, 40, i, i, 255, 255);
+        }
+        qp_flush(lcd);
     }
 #endif // QUANTUM_PAINTER_ENABLE
 }

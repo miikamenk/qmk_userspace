@@ -23,10 +23,27 @@
 
 #define ENCODER_RESOLUTION 4
 
-#define LCD_BACKLIGHT_PIN GP18
-#define LCD_BACKLIGHT_ACTIVE_HIGH
+#define SPI_SCK_PIN GP22
+#define SPI_MOSI_PIN GP23
+#define SPI_MISO_PIN NO_PIN // Unused
+#define LCD_RST_PIN GP13
+#define LCD_DC_PIN GP11
+#define LCD_CS_PIN GP12
+#define BACKLIGHT_PIN GP18
+#define BACKLIGHT_PWM_DRIVER PWMD1
+#define BACKLIGHT_PWM_CHANNEL RP2040_PWM_CHANNEL_A
+#define BACKLIGHT_LEVELS 12
+#define BACKLIGHT_DEFAULT_ON true
+#define BACKLIGHT_DEFAULT_LEVEL 7
 
-#define DISPLAY_DC_PIN  GP11
-#define DISPLAY_CS_PIN  GP12
-#define DISPLAY_RST_PIN GP13
-
+#define SPI_DRIVER SPID0
+#define LCD_SPI_DIVISOR 4
+#define LCD_WAIT_TIME 250
+#define LCD_ROTATION QP_ROTATION_0
+#define LCD_OFFSET_X 0
+#define LCD_OFFSET_Y 20
+#define LCD_WIDTH 240 // Set according to your display specs
+#define LCD_HEIGHT 320 // Set according to your display specs
+#define SPI_MODE 0 // Set according to your display specs
+// Timeout configuration, default 30000 (30 sek). 0 = No timeout. Beware of image retention.
+#define QUANTUM_PAINTER_DISPLAY_TIMEOUT 30000
