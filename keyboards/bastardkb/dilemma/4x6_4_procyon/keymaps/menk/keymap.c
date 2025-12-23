@@ -101,10 +101,10 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 
 #ifdef POINTING_DEVICE_ENABLE
 #    ifdef DILEMMA_AUTO_SNIPING_ON_LAYER
-layer_state_t layer_state_set_user(layer_state_t state) {
-    dilemma_set_pointer_sniping_enabled(layer_state_cmp(state, DILEMMA_AUTO_SNIPING_ON_LAYER));
-    return state;
-}
+    layer_state_t layer_state_set_user(layer_state_t state) {
+        dilemma_set_pointer_sniping_enabled(layer_state_cmp(state, DILEMMA_AUTO_SNIPING_ON_LAYER));
+        return state;
+    }
 #    endif // DILEMMA_AUTO_SNIPING_ON_LAYER
 #endif     // POINTING_DEVICE_ENABLEE
 
@@ -124,46 +124,370 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 // clang-format on
 #endif // ENCODER_MAP_ENABLE
 
+
 #ifdef QUANTUM_PAINTER_ENABLE
 #    include "qp.h"
 #    include "qp_comms.h"
-#    include "print.h"
-#    include "gpio.h"
-
 #    include "color.h"
+#    include "gfx/common.qgf.c"
+#    include "gfx/dark-souls.qgf.c"
+#    include "gfx/font_oled.qff.c"
+#    include "gfx/fonts.qff.c"
+
+
+typedef struct {
+    hsv_t primary;
+    hsv_t secondary;
+} dual_hsv_t;
+
+static dual_hsv_t user_hsv;
 
 painter_device_t lcd;
+painter_font_handle_t font_oled;
+painter_font_handle_t font_menu;
+static painter_image_handle_t shift_icon, control_icon, alt_icon,  windows_icon;
+static painter_image_handle_t apple_logo, windows_logo, linux_logo;
+static painter_image_handle_t dark_souls;
 #endif // QUANTUM_PAINTER_ENABLE
 
+
+void painter_render_modifiers(painter_device_t device, painter_font_handle_t font, uint16_t x, uint16_t y,
+                              uint16_t width, bool force_redraw, dual_hsv_t *user_hsv, uint8_t disabled_val) {
+    static uint8_t last_mods = 0;
+    uint8_t current_mods = get_mods() | get_weak_mods() | get_oneshot_mods();
+
+    if (force_redraw || last_mods != current_mods) {
+        last_mods = current_mods;
+
+        // Combine left/right bits
+        uint8_t shift    = MOD_BIT_LSHIFT | MOD_BIT_RSHIFT;
+        uint8_t ctrl     = MOD_BIT_LCTRL  | MOD_BIT_RCTRL;
+        uint8_t alt      = MOD_BIT_LALT   | MOD_BIT_RALT;
+        uint8_t gui      = MOD_BIT_LGUI   | MOD_BIT_RGUI;
+
+        if (qp_drawimage_recolor(device, x, y, shift_icon,
+                                 last_mods & shift ? user_hsv->secondary.h : user_hsv->primary.h,
+                                 last_mods & shift ? user_hsv->secondary.s : user_hsv->primary.s,
+                                 last_mods & shift ? user_hsv->primary.v : disabled_val, 0, 0, 0)) {
+            x += shift_icon->width + 2;
+        }
+
+        if (qp_drawimage_recolor(device, x, y, windows_icon,
+                                 last_mods & gui ? user_hsv->secondary.h : user_hsv->primary.h,
+                                 last_mods & gui ? user_hsv->secondary.s : user_hsv->primary.s,
+                                 last_mods & gui ? user_hsv->primary.v : disabled_val, 0, 0, 0)) {
+            x += windows_icon->width + 2;
+        }
+
+        if (qp_drawimage_recolor(device, x, y, alt_icon,
+                                 last_mods & alt ? user_hsv->secondary.h : user_hsv->primary.h,
+                                 last_mods & alt ? user_hsv->secondary.s : user_hsv->primary.s,
+                                 last_mods & alt ? user_hsv->primary.v : disabled_val, 0, 0, 0)) {
+            x += alt_icon->width + 2;
+        }
+
+        if (qp_drawimage_recolor(device, x, y, control_icon,
+                                 last_mods & ctrl ? user_hsv->secondary.h : user_hsv->primary.h,
+                                 last_mods & ctrl ? user_hsv->secondary.s : user_hsv->primary.s,
+                                 last_mods & ctrl ? user_hsv->primary.v : disabled_val, 0, 0, 0)) {
+            x += control_icon->width + 2;
+        }
+    }
+}
+
+void painter_render_os_detection(painter_device_t device, uint16_t x, uint16_t y,
+                                 bool force_redraw, dual_hsv_t *curr_hsv) {
+#ifdef OS_DETECTION_ENABLE
+    static os_variant_t last_detected_os = {0};
+    os_variant_t        current_detected_os = detected_host_os();
+
+    if (force_redraw || last_detected_os != current_detected_os) {
+        last_detected_os = current_detected_os;
+
+        // Draw OS logo based on detected OS
+        switch (current_detected_os) {
+            case OS_WINDOWS:
+                qp_drawimage_recolor(device, x, y, windows_logo,
+                                     curr_hsv->secondary.h, curr_hsv->secondary.s, curr_hsv->secondary.v,
+                                     0, 0, 0);
+                x += windows_logo->width + 2;
+                break;
+
+            case OS_MACOS:
+                qp_drawimage_recolor(device, x, y, apple_logo,
+                                     curr_hsv->secondary.h, curr_hsv->secondary.s, curr_hsv->secondary.v,
+                                     0, 0, 0);
+                x += apple_logo->width + 2;
+                break;
+
+            case OS_LINUX:
+                qp_drawimage_recolor(device, x, y, linux_logo,
+                                     curr_hsv->secondary.h, curr_hsv->secondary.s, curr_hsv->secondary.v,
+                                     0, 0, 0);
+                x += linux_logo->width + 2;
+                break;
+
+            default:
+                qp_drawimage_recolor(device, x, y, linux_logo,
+                                     curr_hsv->secondary.h, curr_hsv->secondary.s, curr_hsv->secondary.v,
+                                     0, 0, 0);
+                x += linux_logo->width + 2;
+                break;
+        }
+    }
+#endif
+}
+
+void draw_dpi_bar(uint16_t x, uint16_t y, uint16_t dpi, uint16_t width, painter_font_handle_t font) {
+    static const uint16_t dpi_steps[] = {1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400,
+                                         2600, 2800, 3000, 3200, 3400, 4000, 6000, 8000};
+    const size_t step_count = sizeof(dpi_steps) / sizeof(dpi_steps[0]);
+
+    char buf[16];
+    snprintf(buf, sizeof(buf), "DPI: %u", dpi);
+
+    // Draw DPI text
+    qp_drawtext(lcd, x, y, font, buf);
+
+    // Start the bar right after the text
+    uint16_t bar_x = x + qp_textwidth(font, buf) + 4; // 4px spacing
+    uint16_t bar_y = y + (font->line_height / 2) - 2; // vertical center
+    uint16_t bar_height = 4;
+    uint16_t bar_width  = width - bar_x - 4; // padding 4px to the end
+
+    // Draw background (empty bar)
+    qp_rect(lcd, bar_x, bar_y, bar_x + bar_width, bar_y + bar_height, 40, 40, 40, true); // dark gray
+
+    // Draw filled steps
+    for (size_t i = 0; i < step_count; i++) {
+        // Calculate start and end for this step
+        uint16_t step_start = bar_x + (bar_width * i) / step_count;
+        uint16_t step_end   = bar_x + (bar_width * (i + 1)) / step_count - 1;
+
+        if (dpi >= dpi_steps[i]) {
+            qp_rect(lcd, step_start, bar_y, step_end, bar_y + bar_height, 90, 255, 255, true); // green fill
+        }
+    }
+}
+
+
+void ili9341_draw_user(void) {
+    static layer_state_t last_layer = 0xFF;
+    static bool          first_draw = true;
+#if defined(WPM_ENABLE)
+    static uint16_t      last_wpm   = 0;
+#endif
+#if defined(RGB_MATRIX_ENABLE)
+    static uint8_t       last_rgb   = 0xFF;
+#endif
+
+#if defined(POINTING_DEVICE_ENABLE)
+    static uint16_t last_dpi = 0xFFFF;
+#endif
+
+    uint16_t width, height;
+    qp_get_geometry(lcd, &width, &height, NULL, NULL, NULL);
+
+    if (first_draw) {
+        qp_rect(lcd, 0, 0, width, height, 0, 0, 0, true);
+        qp_drawimage(lcd, 0, 53, dark_souls);
+    }
+
+    uint16_t x = 4;
+    uint16_t y = height - font_oled->line_height - 4;
+    char buf[32];
+
+    painter_render_modifiers(
+        lcd,               // painter_device_t
+        font_oled,         // font (used for "Modifiers:" label)
+        x,                 // x start
+        y,                 // y start
+        width,             // available width
+        first_draw,        // force redraw on first frame
+        &user_hsv,      // your HSV theme struct
+        80                 // disabled_val (dimmed brightness)
+    );
+
+
+#if defined(WPM_ENABLE)
+    uint16_t wpm = get_current_wpm();
+    if (last_wpm != wpm) {
+        x = 55;
+        // Clear previous WPM text area
+        uint16_t text_width  = qp_textwidth(font_oled, "WPM: 999"); // max expected digits
+        uint16_t text_height = font_oled->line_height;
+        qp_rect(lcd, x, y, x + text_width, y + text_height - 1, 0, 0, 0, true); // fill with background
+
+        // Draw new WPM
+        last_wpm = wpm;
+        snprintf(buf, sizeof(buf), "WPM: %u", last_wpm);
+        qp_drawtext_recolor(lcd, x, y, font_oled, buf,
+                    user_hsv.secondary.h,
+                    user_hsv.secondary.s,
+                    user_hsv.secondary.v,
+                    0, 0, 0
+        );
+    }
+#endif
+
+
+#if defined(POINTING_DEVICE_ENABLE)
+    uint16_t dpi = pointing_device_get_cpi();
+    if (last_dpi != dpi) {
+        last_dpi = dpi;
+        draw_dpi_bar(115, y, dpi, width, font_oled);
+    }
+#endif
+
+    x = 4;
+    y = 6;
+
+    uint8_t layer = get_highest_layer(layer_state);
+
+    if (layer != last_layer) {
+        last_layer = layer;
+
+        // Clear the area first (background)
+        uint16_t text_width = qp_textwidth(font_menu, "03 MOUSE"); // max possible width
+        uint16_t text_height = font_menu->line_height;
+        qp_rect(
+            lcd,
+            x,
+            y,
+            x + text_width,
+            y + text_height - 1,
+            0, 0, 0, true
+        );
+
+        // Draw the new text using primary HSV color
+        switch (layer) {
+            case 1:
+                qp_drawtext_recolor(
+                    lcd, x, y, font_menu, "01 FUNC",
+                    user_hsv.primary.h,
+                    user_hsv.primary.s,
+                    user_hsv.primary.v,
+                    0, 0, 0
+                );
+                break;
+
+            case 2:
+                qp_drawtext_recolor(
+                    lcd, x, y, font_menu, "02 NAV",
+                    user_hsv.primary.h,
+                    user_hsv.primary.s,
+                    user_hsv.primary.v,
+                    0, 0, 0
+                );
+                break;
+
+            case 3:
+                qp_drawtext_recolor(
+                    lcd, x, y, font_menu, "03 MOUSE",
+                    user_hsv.primary.h,
+                    user_hsv.primary.s,
+                    user_hsv.primary.v,
+                    0, 0, 0
+                );
+                break;
+
+            default:
+                qp_drawtext_recolor(
+                    lcd, x, y, font_menu, "00 BASE",
+                    user_hsv.primary.h,
+                    user_hsv.primary.s,
+                    user_hsv.primary.v,
+                    0, 0, 0
+                );
+                break;
+        }
+    }
+    painter_render_os_detection(lcd, 180, y, false, &user_hsv);
+
+    y += font_menu->line_height + 10;
+    x = 4;
+
+
+#if defined(RGB_MATRIX_ENABLE)
+    if (last_rgb != rgb_matrix_get_mode()) {
+        last_rgb = rgb_matrix_get_mode();
+        snprintf(buf, sizeof(buf), "RGB: %s", rgb_matrix_get_mode_name(last_rgb));
+        qp_drawtext(lcd, x, y, font_oled, buf);
+    }
+#endif
+    first_draw = false;
+    qp_flush(lcd);
+}
+
 void keyboard_post_init_keymap(void) {
-    debug_enable = true;
 #ifdef QUANTUM_PAINTER_ENABLE
     if (is_keyboard_left()) {
         wait_ms(LCD_WAIT_TIME);
-        //gpio_set_pin_output(LCD_RST_PIN);
-        //gpio_write_pin_low(LCD_RST_PIN);
-        //wait_ms(20);
-        //gpio_write_pin_high(LCD_RST_PIN);
-        //wait_ms(150);
+        user_hsv.primary.h   = 200;  // base color (blue-ish)
+        user_hsv.primary.s   = 255;
+        user_hsv.primary.v   = 150;
+
+        user_hsv.secondary.h = 40;   // active modifier color (yellow/orange)
+        user_hsv.secondary.s = 255;
+        user_hsv.secondary.v = 255;
+
 
         lcd = qp_ili9341_make_spi_device(LCD_WIDTH, LCD_HEIGHT, LCD_CS_PIN, LCD_DC_PIN, LCD_RST_PIN, LCD_SPI_DIVISOR, SPI_MODE);
+
         qp_init(lcd, LCD_ROTATION);
-        print(lcd);
+
         qp_power(lcd, true);
         qp_clear(lcd);
 
-        // Display offset
-        //qp_set_viewport_offsets(lcd, LCD_OFFSET_X, LCD_OFFSET_Y);
+        // load fonts
+        font_oled = qp_load_font_mem(font_oled_font);
+        font_menu = qp_load_font_mem(font_gridlitepbsmenu);
 
-        // Power on display, fill with white
-        qp_rect(lcd, 0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1, HSV_BLUE, true);
-        qp_flush(lcd);
+        windows_logo = qp_load_image_mem(gfx_windows_logo);
+        apple_logo   = qp_load_image_mem(gfx_apple_logo);
+        linux_logo   = qp_load_image_mem(gfx_linux_logo);
+        dark_souls   = qp_load_image_mem(gfx_dark_souls);
+
+        shift_icon   = qp_load_image_mem(gfx_shift_icon);
+        control_icon = qp_load_image_mem(gfx_control_icon);
+        alt_icon     = qp_load_image_mem(gfx_alt_icon);
+        windows_icon = qp_load_image_mem(gfx_windows_icon);
     }
 #endif // QUANTUM_PAINTER_ENABLE
 }
+
+void keyboard_post_init_user(void) {
+    keyboard_post_init_keymap();
+}
+
 void housekeeping_task_user(void) {
 #ifdef QUANTUM_PAINTER_ENABLE
-    qp_setpixel(lcd, 0, 0, 255, 255, 255);
-    qp_flush(lcd);
-#endif // QUANTUM_PAINTER_ENABLE
+    static uint32_t last_draw = 0;
+
+    // Only handle display updates on left side
+    if (is_keyboard_left()) {
+        if (timer_elapsed32(last_draw) > 33) { // throttle to ~30 FPS
+            last_draw = timer_read32();
+            ili9341_draw_user();
+        }
+    }
+
+    // Handle backlight on both halves for consistency
+    // This ensures both halves behave the same way regardless of which is master
+    uint32_t activity_time = last_input_activity_elapsed();
+
+    if (is_backlight_enabled() && (activity_time > QUANTUM_PAINTER_DISPLAY_TIMEOUT)) {
+        // Timeout reached - turn backlight off
+        backlight_level_noeeprom(0);
+    } else if (activity_time > (QUANTUM_PAINTER_DISPLAY_TIMEOUT / 4)) {
+        // Low brightness for standby
+        backlight_level_noeeprom(1);
+    } else if (activity_time > (QUANTUM_PAINTER_DISPLAY_TIMEOUT / 8)) {
+        // Medium brightness
+        backlight_level_noeeprom(5);
+    } else if (activity_time < QUANTUM_PAINTER_DISPLAY_TIMEOUT) {
+        // Normal operation
+        backlight_level_noeeprom(BACKLIGHT_DEFAULT_LEVEL);
+    }
+#endif
 }
