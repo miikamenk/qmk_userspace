@@ -463,6 +463,8 @@ void keyboard_post_init_user(void) {
 void housekeeping_task_user(void) {
 #ifdef QUANTUM_PAINTER_ENABLE
     static uint32_t last_draw = 0;
+    static uint32_t last_backlight_update = 0;
+    static uint8_t current_backlight_level = BACKLIGHT_DEFAULT_LEVEL;
 
     // Only handle display updates on left side
     if (is_keyboard_left()) {
@@ -472,22 +474,30 @@ void housekeeping_task_user(void) {
         }
     }
 
-    // Handle backlight on both halves for consistency
-    // This ensures both halves behave the same way regardless of which is master
-    uint32_t activity_time = last_input_activity_elapsed();
+    // Throttle backlight updates to prevent flicker
+    if (timer_elapsed32(last_backlight_update) < 50) { // Update at most every 50ms
+        return;
+    }
+    last_backlight_update = timer_read32();
 
-    if (is_backlight_enabled() && (activity_time > QUANTUM_PAINTER_DISPLAY_TIMEOUT)) {
-        // Timeout reached - turn backlight off
-        backlight_level_noeeprom(0);
+    uint32_t activity_time = last_input_activity_elapsed();
+    uint8_t target_backlight_level;
+
+    // Determine target backlight level based on activity time
+    if (activity_time > QUANTUM_PAINTER_DISPLAY_TIMEOUT) {
+        target_backlight_level = 0; // Timed out - completely off
     } else if (activity_time > (QUANTUM_PAINTER_DISPLAY_TIMEOUT / 4)) {
-        // Low brightness for standby
-        backlight_level_noeeprom(1);
+        target_backlight_level = 1; // Low brightness (standby)
     } else if (activity_time > (QUANTUM_PAINTER_DISPLAY_TIMEOUT / 8)) {
-        // Medium brightness
-        backlight_level_noeeprom(5);
-    } else if (activity_time < QUANTUM_PAINTER_DISPLAY_TIMEOUT) {
-        // Normal operation
-        backlight_level_noeeprom(BACKLIGHT_DEFAULT_LEVEL);
+        target_backlight_level = 5; // Medium brightness
+    } else {
+        target_backlight_level = BACKLIGHT_DEFAULT_LEVEL; // Full brightness
+    }
+
+    // Only update backlight if the level has changed
+    if (target_backlight_level != current_backlight_level) {
+        current_backlight_level = target_backlight_level;
+        backlight_level_noeeprom(target_backlight_level);
     }
 #endif
 }
