@@ -16,6 +16,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include QMK_KEYBOARD_H
+#include "transactions.h"
 
 enum dilemma_keymap_layers {
     LAYER_BASE = 0,
@@ -99,6 +100,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 };
 // clang-format on
 
+// pointing device stuff
 #ifdef POINTING_DEVICE_ENABLE
 #    ifdef DILEMMA_AUTO_SNIPING_ON_LAYER
     layer_state_t layer_state_set_user(layer_state_t state) {
@@ -106,7 +108,21 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
         return state;
     }
 #    endif // DILEMMA_AUTO_SNIPING_ON_LAYER
-#endif     // POINTING_DEVICE_ENABLEE
+#endif     // POINTING_DEVICE_ENABLE
+
+typedef struct {
+    uint16_t dpi;
+    uint16_t sniping_dpi;
+} dpi_state_t;
+
+static dpi_state_t dpi_state;
+
+void user_sync_dpi_recv(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
+    if (in_buflen == sizeof(dpi_state)) {
+        memcpy(&dpi_state, in_data, sizeof(dpi_state));
+    }
+}
+
 
 #ifdef RGB_MATRIX_ENABLE
 // Forward-declare this helper function since it is defined in rgb_matrix.c.
@@ -133,6 +149,7 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 #    include "gfx/dark-souls.qgf.c"
 #    include "gfx/font_oled.qff.c"
 #    include "gfx/fonts.qff.c"
+#    include "gfx/mew.qgf.c"
 
 
 typedef struct {
@@ -143,13 +160,121 @@ typedef struct {
 static dual_hsv_t user_hsv;
 
 painter_device_t lcd;
-painter_font_handle_t font_oled;
-painter_font_handle_t font_menu;
+painter_font_handle_t         font_oled;
+painter_font_handle_t         font_menu;
 static painter_image_handle_t shift_icon, control_icon, alt_icon,  windows_icon;
-static painter_image_handle_t apple_logo, windows_logo, linux_logo;
 static painter_image_handle_t dark_souls;
 #endif // QUANTUM_PAINTER_ENABLE
 
+void draw_dpi_bar(
+    uint16_t x,
+    uint16_t y,
+    uint16_t dpi,
+    uint16_t width,
+    painter_font_handle_t font,
+    bool sniping
+) {
+    char buf[16];
+    snprintf(buf, sizeof(buf), sniping ? "sdpi:%4u" : " dpi:%4u", dpi);
+    qp_drawtext(lcd, x, y, font, buf);
+
+    // Calculate bar position
+    uint16_t bar_x = x + qp_textwidth(font, "sdpi:9999") + 4;
+    uint16_t bar_y = y + (font->line_height / 2) - 2;
+    uint16_t bar_h = 4;
+    uint16_t bar_w = width - 4;
+
+    // Draw background
+    qp_rect(lcd, bar_x, bar_y, bar_x + bar_w, bar_y + bar_h,
+            40, 40, 40, true);
+
+    // Define DPI settings for each mode
+    const uint16_t sniper_steps[] = {200, 300, 400, 500};
+    const uint16_t sniper_step_count = 4;
+
+    // Normal DPI: 400->8000 with 16 steps (17 total values including endpoints)
+    const uint16_t normal_step_count = 16;
+    const uint16_t normal_min_dpi = 400;
+    const uint16_t normal_max_dpi = 8000;
+    const uint16_t normal_step_size = (normal_max_dpi - normal_min_dpi) / (normal_step_count - 1);
+
+    if (sniping) {
+        // Find closest sniper step
+        uint16_t closest_step = 0;
+        uint16_t min_diff = UINT16_MAX;
+
+        for (int i = 0; i < sniper_step_count; i++) {
+            uint16_t diff = (dpi > sniper_steps[i]) ? (dpi - sniper_steps[i]) : (sniper_steps[i] - dpi);
+            if (diff < min_diff) {
+                min_diff = diff;
+                closest_step = i;
+            }
+        }
+
+        // Draw filled portion for sniper mode (discrete steps)
+        uint16_t segment_width = bar_w / (sniper_step_count - 1);
+        uint16_t filled_width = (closest_step + 1) * segment_width;
+
+        if (filled_width > 0) {
+            qp_rect(lcd,
+                    bar_x,
+                    bar_y,
+                    bar_x + filled_width,
+                    bar_y + bar_h,
+                    255, 90, 90,  // Red color for sniper mode
+                    true);
+        }
+
+        // Draw markers for each sniper step
+        for (int i = 1; i < sniper_step_count; i++) {
+            uint16_t marker_x = bar_x + i * segment_width;
+            qp_rect(lcd,
+                    marker_x - 1, bar_y - 1,
+                    marker_x + 1, bar_y + bar_h + 1,
+                    60, 60, 60,  // Dark gray markers
+                    true);
+        }
+    } else {
+        // Normal mode: map DPI to one of the 17 discrete steps
+        uint16_t clamped_dpi = dpi;
+        if (clamped_dpi < normal_min_dpi) clamped_dpi = normal_min_dpi;
+        if (clamped_dpi > normal_max_dpi) clamped_dpi = normal_max_dpi;
+
+        // Calculate which step this DPI corresponds to
+        uint16_t step_index = (clamped_dpi - normal_min_dpi) / normal_step_size;
+
+        // Ensure we don't exceed max index
+        if (step_index >= normal_step_count) step_index = normal_step_count - 1;
+
+        // Calculate filled width based on step index (not continuous)
+        uint16_t segment_width = bar_w / (normal_step_count - 1);
+        uint16_t filled_width = (step_index + 1) * segment_width;
+
+        if (filled_width > 0) {
+            qp_rect(lcd,
+                    bar_x,
+                    bar_y,
+                    bar_x + filled_width,
+                    bar_y + bar_h,
+                    90, 255, 255,  // Cyan color for normal mode
+                    true);
+        }
+
+        // Draw markers for every 4th step to avoid clutter
+        for (int i = 4; i < normal_step_count; i += 4) {
+            uint16_t marker_x = bar_x + i * segment_width;
+            qp_rect(lcd,
+                    marker_x - 1, bar_y - 1,
+                    marker_x + 1, bar_y + bar_h + 1,
+                    60, 60, 60,  // Dark gray markers
+                    true);
+        }
+    }
+
+    // Draw outline around the entire bar
+    qp_rect(lcd, bar_x, bar_y, bar_x + bar_w, bar_y + bar_h,
+            100, 100, 100, false);
+}
 
 void painter_render_modifiers(painter_device_t device, painter_font_handle_t font, uint16_t x, uint16_t y,
                               uint16_t width, bool force_redraw, dual_hsv_t *user_hsv, uint8_t disabled_val) {
@@ -195,80 +320,72 @@ void painter_render_modifiers(painter_device_t device, painter_font_handle_t fon
     }
 }
 
-void painter_render_os_detection(painter_device_t device, uint16_t x, uint16_t y,
-                                 bool force_redraw, dual_hsv_t *curr_hsv) {
-#ifdef OS_DETECTION_ENABLE
-    static os_variant_t last_detected_os = {0};
-    os_variant_t        current_detected_os = detected_host_os();
 
-    if (force_redraw || last_detected_os != current_detected_os) {
-        last_detected_os = current_detected_os;
-
-        // Draw OS logo based on detected OS
-        switch (current_detected_os) {
-            case OS_WINDOWS:
-                qp_drawimage_recolor(device, x, y, windows_logo,
-                                     curr_hsv->secondary.h, curr_hsv->secondary.s, curr_hsv->secondary.v,
-                                     0, 0, 0);
-                x += windows_logo->width + 2;
-                break;
-
-            case OS_MACOS:
-                qp_drawimage_recolor(device, x, y, apple_logo,
-                                     curr_hsv->secondary.h, curr_hsv->secondary.s, curr_hsv->secondary.v,
-                                     0, 0, 0);
-                x += apple_logo->width + 2;
-                break;
-
-            case OS_LINUX:
-                qp_drawimage_recolor(device, x, y, linux_logo,
-                                     curr_hsv->secondary.h, curr_hsv->secondary.s, curr_hsv->secondary.v,
-                                     0, 0, 0);
-                x += linux_logo->width + 2;
-                break;
-
-            default:
-                qp_drawimage_recolor(device, x, y, linux_logo,
-                                     curr_hsv->secondary.h, curr_hsv->secondary.s, curr_hsv->secondary.v,
-                                     0, 0, 0);
-                x += linux_logo->width + 2;
-                break;
-        }
-    }
-#endif
-}
-
-void draw_dpi_bar(uint16_t x, uint16_t y, uint16_t dpi, uint16_t width, painter_font_handle_t font) {
-    static const uint16_t dpi_steps[] = {1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400,
-                                         2600, 2800, 3000, 3200, 3400, 4000, 6000, 8000};
-    const size_t step_count = sizeof(dpi_steps) / sizeof(dpi_steps[0]);
-
-    char buf[16];
-    snprintf(buf, sizeof(buf), "DPI: %u", dpi);
-
-    // Draw DPI text
-    qp_drawtext(lcd, x, y, font, buf);
-
-    // Start the bar right after the text
-    uint16_t bar_x = x + qp_textwidth(font, buf) + 4; // 4px spacing
-    uint16_t bar_y = y + (font->line_height / 2) - 2; // vertical center
-    uint16_t bar_height = 4;
-    uint16_t bar_width  = width - bar_x - 4; // padding 4px to the end
-
-    // Draw background (empty bar)
-    qp_rect(lcd, bar_x, bar_y, bar_x + bar_width, bar_y + bar_height, 40, 40, 40, true); // dark gray
-
-    // Draw filled steps
-    for (size_t i = 0; i < step_count; i++) {
-        // Calculate start and end for this step
-        uint16_t step_start = bar_x + (bar_width * i) / step_count;
-        uint16_t step_end   = bar_x + (bar_width * (i + 1)) / step_count - 1;
-
-        if (dpi >= dpi_steps[i]) {
-            qp_rect(lcd, step_start, bar_y, step_end, bar_y + bar_height, 90, 255, 255, true); // green fill
-        }
-    }
-}
+// removed for now, keeping here if I add a different wpm animation
+// void wpm_animation(uint16_t wpm, uint16_t last_wpm) {
+//     // Clean up animations when transitioning between states
+//     if (wpm < 20) {
+//         // Coming from higher WPM states to sleep
+//         if (mew_twirl_token != INVALID_DEFERRED_TOKEN) {
+//             qp_stop_animation(mew_twirl_token);
+//             mew_twirl_token = INVALID_DEFERRED_TOKEN;
+//         }
+//         if (mew_hop_token != INVALID_DEFERRED_TOKEN) {
+//             qp_stop_animation(mew_hop_token);
+//             mew_hop_token = INVALID_DEFERRED_TOKEN;
+//         }
+//
+//         // Start sleep animation if not already running
+//         if (mew_sleep_token == INVALID_DEFERRED_TOKEN) {
+//             // Clear the animation area (212,0 to 236,60)
+//             qp_rect(lcd, 212, 0, 236, 60, 0, 0, 0, true);
+//             // Create and start sleep animation
+//             mew_sleep_token = qp_animate(lcd, 212, 28, mew_sleep);
+//         }
+//     }
+//     else if (wpm >= 20 && wpm <= 60) {
+//         // TWIRL state
+//         // Was in sleep, stop it
+//         if (mew_sleep_token != INVALID_DEFERRED_TOKEN) {
+//             qp_stop_animation(mew_sleep_token);
+//             mew_sleep_token = INVALID_DEFERRED_TOKEN;
+//         }
+//         // Was in hop, stop it
+//         if (mew_hop_token != INVALID_DEFERRED_TOKEN) {
+//             qp_stop_animation(mew_hop_token);
+//             mew_hop_token = INVALID_DEFERRED_TOKEN;
+//         }
+//
+//         // Start twirl animation if not already running
+//         if (mew_twirl_token == INVALID_DEFERRED_TOKEN) {
+//             // Clear the animation area
+//             qp_rect(lcd, 212, 0, 236, 60, 0, 0, 0, true);
+//
+//             mew_twirl_token = qp_animate(lcd, 212, 20, mew_twirl);
+//         }
+//     }
+//     else { // wpm > 60
+//         // HOP state
+//         // Was in sleep, stop it
+//         if (mew_sleep_token != INVALID_DEFERRED_TOKEN) {
+//             qp_stop_animation(mew_sleep_token);
+//             mew_sleep_token = INVALID_DEFERRED_TOKEN;
+//         }
+//         // Was in twirl, stop it
+//         if (mew_twirl_token != INVALID_DEFERRED_TOKEN) {
+//             qp_stop_animation(mew_twirl_token);
+//             mew_twirl_token = INVALID_DEFERRED_TOKEN;
+//         }
+//
+//         // Start hop animation if not already running
+//         if (mew_hop_token == INVALID_DEFERRED_TOKEN) {
+//             // Clear the animation area
+//             qp_rect(lcd, 212, 0, 236, 60, 0, 0, 0, true);
+//
+//             mew_hop_token = qp_animate(lcd, 212, 0, mew_hop);
+//         }
+//     }
+// }
 
 
 void ili9341_draw_user(void) {
@@ -283,6 +400,7 @@ void ili9341_draw_user(void) {
 
 #if defined(POINTING_DEVICE_ENABLE)
     static uint16_t last_dpi = 0xFFFF;
+    static uint16_t last_sdpi = 0xFFFF;
 #endif
 
     uint16_t width, height;
@@ -318,6 +436,8 @@ void ili9341_draw_user(void) {
         uint16_t text_height = font_oled->line_height;
         qp_rect(lcd, x, y, x + text_width, y + text_height - 1, 0, 0, 0, true); // fill with background
 
+        //wpm_animation(wpm, last_wpm);
+
         // Draw new WPM
         last_wpm = wpm;
         snprintf(buf, sizeof(buf), "WPM: %u", last_wpm);
@@ -329,13 +449,19 @@ void ili9341_draw_user(void) {
         );
     }
 #endif
-
+    y = 6;
 
 #if defined(POINTING_DEVICE_ENABLE)
-    uint16_t dpi = pointing_device_get_cpi();
+    uint16_t dpi = dpi_state.dpi;
+    uint16_t sniping_dpi = dpi_state.sniping_dpi;
     if (last_dpi != dpi) {
         last_dpi = dpi;
-        draw_dpi_bar(115, y, dpi, width, font_oled);
+        draw_dpi_bar(115, y, dpi, width, font_oled, false);
+    }
+    y += font_oled->line_height + 4;
+    if (last_sdpi != sniping_dpi) {
+        last_sdpi = sniping_dpi;
+        draw_dpi_bar(115, y, sniping_dpi, width, font_oled, true);
     }
 #endif
 
@@ -402,7 +528,6 @@ void ili9341_draw_user(void) {
                 break;
         }
     }
-    painter_render_os_detection(lcd, 180, y, false, &user_hsv);
 
     y += font_menu->line_height + 10;
     x = 4;
@@ -411,13 +536,22 @@ void ili9341_draw_user(void) {
 #if defined(RGB_MATRIX_ENABLE)
     if (last_rgb != rgb_matrix_get_mode()) {
         last_rgb = rgb_matrix_get_mode();
+        uint16_t text_width  = qp_textwidth(font_oled, "RGB: XXXXXXXXXXXXXXXXXXXXXXXXX"); // max expected digits
+        uint16_t text_height = font_oled->line_height;
+        qp_rect(lcd, x, y, x + text_width, y + text_height - 2, 0, 0, 0, true); // fill with background
         snprintf(buf, sizeof(buf), "RGB: %s", rgb_matrix_get_mode_name(last_rgb));
-        qp_drawtext(lcd, x, y, font_oled, buf);
+        qp_drawtext_recolor(lcd, x, y, font_oled, buf,
+                    user_hsv.secondary.h,
+                    user_hsv.secondary.s,
+                    user_hsv.secondary.v,
+                    0, 0, 0
+        );
     }
 #endif
     first_draw = false;
     qp_flush(lcd);
 }
+
 
 void keyboard_post_init_keymap(void) {
 #ifdef QUANTUM_PAINTER_ENABLE
@@ -443,9 +577,6 @@ void keyboard_post_init_keymap(void) {
         font_oled = qp_load_font_mem(font_oled_font);
         font_menu = qp_load_font_mem(font_gridlitepbsmenu);
 
-        windows_logo = qp_load_image_mem(gfx_windows_logo);
-        apple_logo   = qp_load_image_mem(gfx_apple_logo);
-        linux_logo   = qp_load_image_mem(gfx_linux_logo);
         dark_souls   = qp_load_image_mem(gfx_dark_souls);
 
         shift_icon   = qp_load_image_mem(gfx_shift_icon);
@@ -457,6 +588,7 @@ void keyboard_post_init_keymap(void) {
 }
 
 void keyboard_post_init_user(void) {
+    transaction_register_rpc(USER_SYNC_DPI, user_sync_dpi_recv);
     keyboard_post_init_keymap();
 }
 
@@ -498,6 +630,18 @@ void housekeeping_task_user(void) {
     if (target_backlight_level != current_backlight_level) {
         current_backlight_level = target_backlight_level;
         backlight_level_noeeprom(target_backlight_level);
+    }
+#endif
+#if defined(POINTING_DEVICE_ENABLE)
+    if (is_keyboard_master()) {
+        uint16_t dpi = pointing_device_get_cpi();
+        uint16_t sniping = dilemma_get_pointer_sniping_dpi();
+
+        if (dpi_state.dpi != dpi || dpi_state.sniping_dpi != sniping) {
+            dpi_state.dpi = dpi;
+            dpi_state.sniping_dpi = sniping;
+            transaction_rpc_send(USER_SYNC_DPI, sizeof(dpi_state), &dpi_state);
+        }
     }
 #endif
 }
