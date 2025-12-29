@@ -170,7 +170,7 @@ void draw_dpi_bar(
     uint16_t x,
     uint16_t y,
     uint16_t dpi,
-    uint16_t width,
+    uint16_t screen_width,
     painter_font_handle_t font,
     bool sniping
 ) {
@@ -178,102 +178,126 @@ void draw_dpi_bar(
     snprintf(buf, sizeof(buf), sniping ? "sdpi:%4u" : " dpi:%4u", dpi);
     qp_drawtext(lcd, x, y, font, buf);
 
-    // Calculate bar position
-    uint16_t bar_x = x + qp_textwidth(font, "sdpi:9999") + 4;
+    // Calculate bar position and dimensions
+    uint16_t text_width = qp_textwidth(font, "sdpi:9999");
+    uint16_t bar_x = x + text_width + 4;
     uint16_t bar_y = y + (font->line_height / 2) - 2;
     uint16_t bar_h = 4;
-    uint16_t bar_w = width - 4;
+
+    // Calculate available bar width (don't overflow screen)
+    uint16_t bar_w;
+    if (bar_x >= screen_width) {
+        // Not enough space for bar
+        return;
+    }
+
+    // Leave some right margin (4 pixels)
+    if (screen_width - bar_x - 4 > 0) {
+        bar_w = screen_width - bar_x - 4;
+    } else {
+        bar_w = 0;
+    }
 
     // Draw background
-    qp_rect(lcd, bar_x, bar_y, bar_x + bar_w, bar_y + bar_h,
-            40, 40, 40, true);
+    if (bar_w > 0) {
+        qp_rect(lcd, bar_x, bar_y, bar_x + bar_w, bar_y + bar_h,
+                40, 40, 40, true);
+    }
 
     // Define DPI settings for each mode
     const uint16_t sniper_steps[] = {200, 300, 400, 500};
     const uint16_t sniper_step_count = 4;
 
-    // Normal DPI: 400->8000 with 16 steps (17 total values including endpoints)
-    const uint16_t normal_step_count = 16;
-    const uint16_t normal_min_dpi = 400;
-    const uint16_t normal_max_dpi = 8000;
-    const uint16_t normal_step_size = (normal_max_dpi - normal_min_dpi) / (normal_step_count - 1);
+    // Normal DPI steps as specified
+    // You need to change /quantum/digitizer_mouse_fallback.c:64 to 3200 to match the keyboard's dpi steps
+
+    const uint16_t normal_steps[] = {400, 600, 800, 1000, 1200, 1400, 1600,
+                                     2000, 2200, 2400, 2600, 2800, 3000, 3200};
+    const uint16_t normal_step_count = 14;
 
     if (sniping) {
         // Find closest sniper step
-        uint16_t closest_step = 0;
+        uint16_t closest_index = 0;
         uint16_t min_diff = UINT16_MAX;
 
         for (int i = 0; i < sniper_step_count; i++) {
             uint16_t diff = (dpi > sniper_steps[i]) ? (dpi - sniper_steps[i]) : (sniper_steps[i] - dpi);
             if (diff < min_diff) {
                 min_diff = diff;
-                closest_step = i;
+                closest_index = i;
             }
         }
 
-        // Draw filled portion for sniper mode (discrete steps)
-        uint16_t segment_width = bar_w / (sniper_step_count - 1);
-        uint16_t filled_width = (closest_step + 1) * segment_width;
+        if (bar_w > 0 && sniper_step_count > 1) {
+            // Draw filled portion for sniper mode (discrete steps)
+            uint16_t segment_width = bar_w / (sniper_step_count - 1);
+            uint16_t filled_width = (closest_index + 1) * segment_width;
 
-        if (filled_width > 0) {
-            qp_rect(lcd,
-                    bar_x,
-                    bar_y,
-                    bar_x + filled_width,
-                    bar_y + bar_h,
-                    255, 90, 90,  // Red color for sniper mode
-                    true);
-        }
+            if (filled_width > 0) {
+                qp_rect(lcd,
+                        bar_x,
+                        bar_y,
+                        bar_x + filled_width,
+                        bar_y + bar_h,
+                        255, 90, 90,  // Red color for sniper mode
+                        true);
+            }
 
-        // Draw markers for each sniper step
-        for (int i = 1; i < sniper_step_count; i++) {
-            uint16_t marker_x = bar_x + i * segment_width;
-            qp_rect(lcd,
-                    marker_x - 1, bar_y - 1,
-                    marker_x + 1, bar_y + bar_h + 1,
-                    60, 60, 60,  // Dark gray markers
-                    true);
+            // Draw markers for each sniper step
+            for (int i = 1; i < sniper_step_count; i++) {
+                uint16_t marker_x = bar_x + i * segment_width;
+                qp_rect(lcd,
+                        marker_x - 1, bar_y - 1,
+                        marker_x + 1, bar_y + bar_h + 1,
+                        60, 60, 60,  // Dark gray markers
+                        true);
+            }
         }
     } else {
-        // Normal mode: map DPI to one of the 17 discrete steps
-        uint16_t clamped_dpi = dpi;
-        if (clamped_dpi < normal_min_dpi) clamped_dpi = normal_min_dpi;
-        if (clamped_dpi > normal_max_dpi) clamped_dpi = normal_max_dpi;
+        // Find closest normal step
+        uint16_t closest_index = 0;
+        uint16_t min_diff = UINT16_MAX;
 
-        // Calculate which step this DPI corresponds to
-        uint16_t step_index = (clamped_dpi - normal_min_dpi) / normal_step_size;
-
-        // Ensure we don't exceed max index
-        if (step_index >= normal_step_count) step_index = normal_step_count - 1;
-
-        // Calculate filled width based on step index (not continuous)
-        uint16_t segment_width = bar_w / (normal_step_count - 1);
-        uint16_t filled_width = (step_index + 1) * segment_width;
-
-        if (filled_width > 0) {
-            qp_rect(lcd,
-                    bar_x,
-                    bar_y,
-                    bar_x + filled_width,
-                    bar_y + bar_h,
-                    90, 255, 255,  // Cyan color for normal mode
-                    true);
+        for (int i = 0; i < normal_step_count; i++) {
+            uint16_t diff = (dpi > normal_steps[i]) ? (dpi - normal_steps[i]) : (normal_steps[i] - dpi);
+            if (diff < min_diff) {
+                min_diff = diff;
+                closest_index = i;
+            }
         }
 
-        // Draw markers for every 4th step to avoid clutter
-        for (int i = 4; i < normal_step_count; i += 4) {
-            uint16_t marker_x = bar_x + i * segment_width;
-            qp_rect(lcd,
-                    marker_x - 1, bar_y - 1,
-                    marker_x + 1, bar_y + bar_h + 1,
-                    60, 60, 60,  // Dark gray markers
-                    true);
+        if (bar_w > 0 && normal_step_count > 1) {
+            // Draw filled portion for normal mode (discrete steps)
+            uint16_t segment_width = bar_w / (normal_step_count - 1);
+            uint16_t filled_width = (closest_index + 1) * segment_width;
+
+            if (filled_width > 0) {
+                qp_rect(lcd,
+                        bar_x,
+                        bar_y,
+                        bar_x + filled_width,
+                        bar_y + bar_h,
+                        90, 255, 255,  // Cyan color for normal mode
+                        true);
+            }
+
+            // Draw markers for every 2nd step to avoid clutter
+            for (int i = 2; i < normal_step_count; i += 2) {
+                uint16_t marker_x = bar_x + i * segment_width;
+                qp_rect(lcd,
+                        marker_x - 1, bar_y - 1,
+                        marker_x + 1, bar_y + bar_h + 1,
+                        60, 60, 60,  // Dark gray markers
+                        true);
+            }
         }
     }
 
     // Draw outline around the entire bar
-    qp_rect(lcd, bar_x, bar_y, bar_x + bar_w, bar_y + bar_h,
-            100, 100, 100, false);
+    if (bar_w > 0) {
+        qp_rect(lcd, bar_x, bar_y, bar_x + bar_w, bar_y + bar_h,
+                100, 100, 100, false);
+    }
 }
 
 void painter_render_modifiers(painter_device_t device, painter_font_handle_t font, uint16_t x, uint16_t y,
@@ -456,12 +480,12 @@ void ili9341_draw_user(void) {
     uint16_t sniping_dpi = dpi_state.sniping_dpi;
     if (last_dpi != dpi) {
         last_dpi = dpi;
-        draw_dpi_bar(115, y, dpi, width, font_oled, false);
+        draw_dpi_bar(120, y, dpi, width, font_oled, false);
     }
     y += font_oled->line_height + 4;
     if (last_sdpi != sniping_dpi) {
         last_sdpi = sniping_dpi;
-        draw_dpi_bar(115, y, sniping_dpi, width, font_oled, true);
+        draw_dpi_bar(120, y, sniping_dpi, width, font_oled, true);
     }
 #endif
 
