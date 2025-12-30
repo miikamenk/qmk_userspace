@@ -1,6 +1,7 @@
 /**
  * Copyright 2021 Charly Delay <charly@codesink.dev> (@0xcharly)
  * Copyright 2023 casuanoob <casuanoob@hotmail.com> (@casuanoob)
+ * Copyright 2025 Menk <miikamenk@duck.com> (@miikamenk)
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -48,11 +49,11 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
   // ├──────────────────────────────────────────────────────┤ ├──────────────────────────────────────────────────────┤
         KC_TAB,    KC_Q,    KC_W,    KC_E,    KC_R,    KC_T,       KC_Y,    KC_U,    KC_I,    KC_O,    KC_P, KC_BSLS,
   // ├──────────────────────────────────────────────────────┤ ├──────────────────────────────────────────────────────┤
-       KC_LSFT,    KC_A,    KC_S,    KC_D,    KC_F,    KC_G,       KC_H,    KC_J,    KC_K,    KC_L, KC_SCLN, KC_QUOT,
+       KC_LCTL,    KC_A,    KC_S,    KC_D,    KC_F,    KC_G,       KC_H,    KC_J,    KC_K,    KC_L, KC_SCLN, KC_QUOT,
   // ├──────────────────────────────────────────────────────┤ ├──────────────────────────────────────────────────────┤
-       KC_LCTL,    PT_Z,    KC_X,    KC_C,    KC_V,    KC_B,       KC_N,    KC_M, KC_COMM,  KC_DOT, PT_SLSH, KC_LALT,
+       KC_LSFT,    PT_Z,    KC_X,    KC_C,    KC_V,    KC_B,       KC_N,    KC_M, KC_COMM,  KC_DOT, PT_SLSH, KC_LALT,
   // ╰──────────────────────────────────────────────────────┤ ├──────────────────────────────────────────────────────╯
-                         KC_LALT, KC_BSPC,  KC_SPC,   LOWER,      RAISE,  KC_ENT, KC_DEL,  KC_MUTE
+                         LOWER,  KC_LGUI,  KC_SPC,   LOWER,      KC_RGUI,  KC_ENT, KC_BSPC, RAISE
   //                    ╰───────────────────────────────────╯ ╰───────────────────────────────────╯
   ),
 
@@ -86,9 +87,9 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 
   [LAYER_POINTER] = LAYOUT(
   // ╭──────────────────────────────────────────────────────╮ ╭──────────────────────────────────────────────────────╮
-       XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX,    XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX,
+       QK_BOOT, XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX,    XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX,
   // ├──────────────────────────────────────────────────────┤ ├──────────────────────────────────────────────────────┤
-       XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX, DPI_MOD, S_D_MOD,    S_D_MOD, DPI_MOD, XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX,
+       XXXXXXX, XXXXXXX, XXXXXXX, S_D_MOD, DPI_MOD, S_D_MOD,    S_D_MOD, DPI_MOD, XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX,
   // ├──────────────────────────────────────────────────────┤ ├──────────────────────────────────────────────────────┤
        XXXXXXX, KC_LGUI, KC_LALT, KC_LCTL, KC_LSFT, XXXXXXX,    XXXXXXX, KC_RSFT, KC_RCTL, KC_RALT, KC_RGUI, XXXXXXX,
   // ├──────────────────────────────────────────────────────┤ ├──────────────────────────────────────────────────────┤
@@ -99,6 +100,32 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
   ),
 };
 // clang-format on
+
+#ifdef CAPS_WORD_ENABLE
+bool caps_word_press_user(uint16_t keycode) {
+    switch (keycode) {
+        case KC_A ... KC_Z:
+        case KC_SCLN:
+        case KC_QUOT:
+        case KC_SLSH:
+            add_weak_mods(MOD_BIT(KC_LSFT));  // Apply shift to next key.
+            return true;
+
+        // Keycodes that continue Caps Word, without shifting.
+        case KC_1 ... KC_0:
+        case KC_BSPC:
+        case KC_DEL:
+        case KC_MINS:
+        case KC_DOT:
+        case KC_COMM:
+        case KC_UNDS:
+            return true;
+
+        default:
+            return false;  // Deactivate Caps Word.
+    }
+}
+#endif
 
 // pointing device stuff
 #ifdef POINTING_DEVICE_ENABLE
@@ -120,6 +147,16 @@ static dpi_state_t dpi_state;
 void user_sync_dpi_recv(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
     if (in_buflen == sizeof(dpi_state)) {
         memcpy(&dpi_state, in_data, sizeof(dpi_state));
+    }
+}
+
+static bool is_caps_on = false;
+
+void user_sync_caps_word_recv(uint8_t in_buflen, const void* in_data, uint8_t out_buflen, void* out_data) {
+    // if buffer length matches size of data structure (simple error checking)
+    if (in_buflen == sizeof(is_caps_on)) {
+        // copy data from master into local data structure
+        memcpy(&is_caps_on, in_data, in_buflen);
     }
 }
 
@@ -415,14 +452,17 @@ void painter_render_modifiers(painter_device_t device, painter_font_handle_t fon
 void ili9341_draw_user(void) {
     static layer_state_t last_layer = 0xFF;
     static bool          first_draw = true;
-#if defined(WPM_ENABLE)
+#ifdef WPM_ENABLE
     static uint16_t      last_wpm   = 0;
 #endif
-#if defined(RGB_MATRIX_ENABLE)
+#ifdef CAPS_WORD_ENABLE
+    static bool          last_caps   = false;
+#endif
+#ifdef RGB_MATRIX_ENABLE
     static uint8_t       last_rgb   = 0xFF;
 #endif
 
-#if defined(POINTING_DEVICE_ENABLE)
+#ifdef POINTING_DEVICE_ENABLE
     static uint16_t last_dpi = 0xFFFF;
     static uint16_t last_sdpi = 0xFFFF;
 #endif
@@ -446,15 +486,15 @@ void ili9341_draw_user(void) {
         y,                 // y start
         width,             // available width
         first_draw,        // force redraw on first frame
-        &user_hsv,      // your HSV theme struct
+        &user_hsv,         // HSV theme struct
         80                 // disabled_val (dimmed brightness)
     );
 
 
-#if defined(WPM_ENABLE)
+    x = 55;
+#ifdef WPM_ENABLE
     uint16_t wpm = get_current_wpm();
-    if (last_wpm != wpm) {
-        x = 55;
+    if (last_wpm != wpm || first_draw) {
         // Clear previous WPM text area
         uint16_t text_width  = qp_textwidth(font_oled, "WPM: 999"); // max expected digits
         uint16_t text_height = font_oled->line_height;
@@ -469,6 +509,26 @@ void ili9341_draw_user(void) {
                     user_hsv.secondary.h,
                     user_hsv.secondary.s,
                     user_hsv.secondary.v,
+                    0, 0, 0
+        );
+    }
+    x += qp_textwidth(font_oled, "WPM: 999") + 4;
+#endif
+
+#if defined (CAPS_WORD_ENABLE)
+    bool caps = is_caps_on;
+    if (last_caps != caps || first_draw) {
+        uint16_t text_width  = qp_textwidth(font_oled, "CAPS OFF"); // max expected length
+        uint16_t text_height = font_oled->line_height;
+        qp_rect(lcd, x, y, x + text_width, y + text_height - 1, 0, 0, 0, true); // fill with background
+
+        // Draw new caps word state
+        last_caps = caps;
+        snprintf(buf, sizeof(buf), "CAPS %s", caps ? "ON" : "OFF");
+        qp_drawtext_recolor(lcd, x, y, font_oled, buf,
+                    caps ? user_hsv.secondary.h : user_hsv.primary.h,
+                    caps ? user_hsv.secondary.s : user_hsv.primary.s,
+                    caps ? user_hsv.secondary.v : user_hsv.primary.v,
                     0, 0, 0
         );
     }
@@ -613,6 +673,7 @@ void keyboard_post_init_keymap(void) {
 
 void keyboard_post_init_user(void) {
     transaction_register_rpc(USER_SYNC_DPI, user_sync_dpi_recv);
+    transaction_register_rpc(USER_SYNC_CAPS_WORD, user_sync_caps_word_recv);
     keyboard_post_init_keymap();
 }
 
@@ -656,8 +717,8 @@ void housekeeping_task_user(void) {
         backlight_level_noeeprom(target_backlight_level);
     }
 #endif
-#if defined(POINTING_DEVICE_ENABLE)
     if (is_keyboard_master()) {
+#if defined(POINTING_DEVICE_ENABLE)
         uint16_t dpi = pointing_device_get_cpi();
         uint16_t sniping = dilemma_get_pointer_sniping_dpi();
 
@@ -666,6 +727,14 @@ void housekeeping_task_user(void) {
             dpi_state.sniping_dpi = sniping;
             transaction_rpc_send(USER_SYNC_DPI, sizeof(dpi_state), &dpi_state);
         }
-    }
 #endif
+#if defined(CAPS_WORD_ENABLE)
+        uint16_t caps = is_caps_word_on();
+
+        if (is_caps_on != caps) {
+            is_caps_on = caps;
+            transaction_rpc_send(USER_SYNC_CAPS_WORD, sizeof(is_caps_on), &is_caps_on);
+        }
+#endif
+    }
 }
