@@ -143,6 +143,8 @@ typedef struct {
 } dpi_state_t;
 
 static dpi_state_t dpi_state;
+static bool is_caps_on = false;
+static uint8_t display_mode = 0;
 
 void user_sync_dpi_recv(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
     if (in_buflen == sizeof(dpi_state)) {
@@ -150,16 +152,18 @@ void user_sync_dpi_recv(uint8_t in_buflen, const void *in_data, uint8_t out_bufl
     }
 }
 
-static bool is_caps_on = false;
 
 void user_sync_caps_word_recv(uint8_t in_buflen, const void* in_data, uint8_t out_buflen, void* out_data) {
-    // if buffer length matches size of data structure (simple error checking)
     if (in_buflen == sizeof(is_caps_on)) {
-        // copy data from master into local data structure
         memcpy(&is_caps_on, in_data, in_buflen);
     }
 }
 
+void user_sync_mode_recv(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
+    if (in_buflen == sizeof(display_mode)) {
+        memcpy(&display_mode, in_data, sizeof(display_mode));
+    }
+}
 
 #ifdef RGB_MATRIX_ENABLE
 // Forward-declare this helper function since it is defined in rgb_matrix.c.
@@ -448,6 +452,169 @@ void painter_render_modifiers(painter_device_t device, painter_font_handle_t fon
 //     }
 // }
 
+void draw_interface(uint8_t mode) {
+    qp_rect(lcd,   5,  65, 218,  73, 140, 173, 230, true);
+    qp_rect(lcd,   9,  76, 229,  84, 140, 173, 230, true);
+    switch (mode) {
+        case 0:
+            // window 2 title
+            qp_drawtext_recolor(lcd, 6, 65, font_oled, "Terminal",
+                        0,
+                        0,
+                        0,
+                        140, 173, 230
+            );
+            // window 3 title
+            qp_drawtext_recolor(lcd, 10, 77, font_oled, "Dark Souls 3",
+                        0,
+                        0,
+                        0,
+                        140, 173, 230
+            );
+            qp_drawimage(lcd, 9, 86, dark_souls);
+            break;
+        case 1:
+            // window 2 title
+            qp_drawtext_recolor(lcd, 6, 65, font_oled, "Dark Souls 3",
+                        0,
+                        0,
+                        0,
+                        140, 173, 230
+            );
+            // window 3 title
+            qp_drawtext_recolor(lcd, 10, 77, font_oled, "Terminal",
+                        0,
+                        0,
+                        0,
+                        140, 173, 230
+            );
+            qp_rect(lcd,  9,  86, 239, 251,  85, 237,  59, true);
+            //keylogger output goes here 10, 87, 239, 251
+            break;
+    }
+}
+
+// keylogger terminal stuff
+
+#include "keylogger.c"
+#define KEYLOGGER_SYNC_SIZE 37
+
+// keylogger sync stuff
+typedef struct {
+    char buffer[KEYLOGGER_SYNC_SIZE + 1];
+    bool dirty;
+} keylogger_sync_t;
+
+void user_sync_keylogger_recv(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
+    if (in_buflen >= sizeof(keylogger_sync_t)) {
+        const keylogger_sync_t* sync_data = (const keylogger_sync_t*)in_data;
+        keylogger_set_buffer(sync_data->buffer, strlen(sync_data->buffer));
+    }
+}
+
+// keylogger terminal variables
+static bool terminal_initialized = false;
+
+typedef struct {
+    char text[TERMINAL_WIDTH + 1];
+    uint8_t length;
+} terminal_line_t;
+
+
+static terminal_line_t terminal_lines[MAX_TERMINAL_LINES];
+static uint8_t terminal_line_count = 0;
+
+static void init_terminal_display(void) {
+    // Clear terminal area
+    qp_rect(lcd, 9, 86, 239, 251, 85, 237, 59, true);
+
+    // Initialize line buffers
+    for (int i = 0; i < MAX_TERMINAL_LINES; i++) {
+        terminal_lines[i].text[0] = '\0';
+        terminal_lines[i].length = 0;
+    }
+    terminal_line_count = 0;
+    terminal_initialized = true;
+}
+
+static void process_keylog_for_terminal(const char *text) {
+    // Clear existing lines
+    for (int i = 0; i < MAX_TERMINAL_LINES; i++) {
+        terminal_lines[i].text[0] = '\0';
+        terminal_lines[i].length = 0;
+    }
+    terminal_line_count = 0;
+
+    if (!text || strlen(text) == 0) {
+        return;
+    }
+
+    // Start new line
+    terminal_line_count = 1;
+    terminal_lines[0].length = 0;
+
+    // Process each character
+    for (int i = 0; text[i] != '\0' && terminal_line_count <= MAX_TERMINAL_LINES; i++) {
+        char c = text[i];
+
+        // Skip underscores (empty positions in keylogger)
+        if (c == '_') continue;
+
+        // Check if we need a new line
+        if (terminal_lines[terminal_line_count - 1].length >= TERMINAL_WIDTH) {
+            if (terminal_line_count < MAX_TERMINAL_LINES) {
+                terminal_line_count++;
+                terminal_lines[terminal_line_count - 1].length = 0;
+            } else {
+                // Shift all lines up
+                for (int j = 0; j < MAX_TERMINAL_LINES - 1; j++) {
+                    terminal_lines[j] = terminal_lines[j + 1];
+                }
+                terminal_lines[MAX_TERMINAL_LINES - 1].length = 0;
+                terminal_lines[MAX_TERMINAL_LINES - 1].text[0] = '\0';
+            }
+        }
+
+        // Add character to current line
+        terminal_line_t *current_line = &terminal_lines[terminal_line_count - 1];
+        if (current_line->length < TERMINAL_WIDTH) {
+            current_line->text[current_line->length] = c;
+            current_line->length++;
+            current_line->text[current_line->length] = '\0';
+        }
+    }
+}
+
+static void draw_terminal(void) {
+    // Initialize on first run
+    if (!terminal_initialized) {
+        init_terminal_display();
+    }
+
+    // Get keylogger string and process it
+    const char *keylog_str = keylogger_get_str();
+    process_keylog_for_terminal(keylog_str);
+
+    // Clear terminal area
+    qp_rect(lcd, 9, 86, 239, 251, 85, 237, 59, true);
+
+    // Draw each line
+    for (int i = 0; i < terminal_line_count && i < MAX_TERMINAL_LINES; i++) {
+        if (terminal_lines[i].length > 0) {
+            // Calculate Y position (87 is starting Y)
+            uint16_t y = 87 + (i * (font_oled->line_height + 4));
+
+            // Draw the line
+            qp_drawtext_recolor(lcd, 10, y, font_oled, terminal_lines[i].text,
+                               0, 0, 0,        // Black text
+                               85, 237, 59);   // Green background
+        }
+    }
+
+    // Mark keylogger as clean
+    keylogger_set_dirty(false);
+}
+
 
 void ili9341_draw_user(void) {
     static layer_state_t last_layer = 0xFF;
@@ -466,13 +633,57 @@ void ili9341_draw_user(void) {
     static uint16_t last_dpi = 0xFFFF;
     static uint16_t last_sdpi = 0xFFFF;
 #endif
+    static uint8_t mode = 0xFF;
 
     uint16_t width, height;
     qp_get_geometry(lcd, &width, &height, NULL, NULL, NULL);
 
+    // set up retro windows
     if (first_draw) {
         qp_rect(lcd, 0, 0, width, height, 0, 0, 0, true);
-        qp_drawimage(lcd, 0, 53, dark_souls);
+
+        // window #1
+        qp_line(lcd,   0,  53, 218,  53, 140,  86, 255); // top
+        qp_line(lcd,   0,  53,   0, 196, 140,  86, 255); // left
+        qp_line(lcd,   1,  63, 219,  63, 140, 226, 150); // bar bottom
+        qp_line(lcd, 219,  53, 219,  64, 140, 226, 150); // right
+        qp_line(lcd,   0, 195,   3, 195, 140, 226, 150); // window bottom
+        qp_rect(lcd,   1,  56,   4, 193, 255,   0, 204, true);
+        qp_rect(lcd,   1,  54, 209,  62, 140, 173, 230, true);
+        qp_drawtext_recolor(lcd, 2, 54, font_oled, "Internet Explorer",
+                    0,
+                    0,
+                    0,
+                    140, 173, 230
+        );
+        // window #2
+        qp_line(lcd,   4,  64, 227,  64, 140,  86, 255); // top
+        qp_line(lcd,   4,  64,   4, 228, 140,  86, 255); // left
+        qp_line(lcd,   5,  74, 228,  74, 140,  89, 150); // bar bottom
+        qp_line(lcd, 228,  64, 228,  73, 140, 226, 150); // right
+        qp_line(lcd,   4, 228,   7, 228, 140, 226, 150); // window bottom
+        qp_rect(lcd,   5,  67,   8, 229, 255,   0, 204, true);
+        qp_rect(lcd,   5,  65, 218,  73, 140, 173, 230, true);
+        // window #3
+        qp_line(lcd,   8,  75, 238,  75, 140,  86, 255); // top
+        qp_line(lcd,   8,  75,   8, 252, 140,  86, 255); // left
+        qp_line(lcd,   9,  85, 239,  85, 140, 226, 150); // bar bottom
+        qp_line(lcd, 239,  75, 239, 253, 140, 226, 150); // right
+        qp_line(lcd,   8, 253, 239, 253, 140, 226, 150); // window bottom
+        qp_rect(lcd,   9,  76, 229,  84, 140, 173, 230, true);
+    }
+
+    if (mode != display_mode || first_draw) {
+        mode = display_mode;
+        draw_interface(display_mode);  // Pass the argument here!
+        if (mode == 1) {
+            // Initialize terminal display (not keylogger - that should be done once)
+            terminal_initialized = false;
+        }
+    }
+
+    if (mode == 1 && (keylogger_is_dirty() || !terminal_initialized)) {
+        draw_terminal();
     }
 
     uint16_t x = 4;
@@ -674,7 +885,28 @@ void keyboard_post_init_keymap(void) {
 void keyboard_post_init_user(void) {
     transaction_register_rpc(USER_SYNC_DPI, user_sync_dpi_recv);
     transaction_register_rpc(USER_SYNC_CAPS_WORD, user_sync_caps_word_recv);
+    transaction_register_rpc(USER_SYNC_MODE, user_sync_mode_recv);
+    transaction_register_rpc(USER_SYNC_KEYLOGGER, user_sync_keylogger_recv);
+
+    keylogger_init();
+
     keyboard_post_init_keymap();
+}
+
+bool process_record_user(uint16_t keycode, keyrecord_t *record) {
+    // Process key for keylogger (process ALL keys, not just when terminal is visible)
+    keylogger_process_key(keycode, record);
+
+    switch (keycode) {
+        case QK_USER_15:
+            if (record->event.pressed) {
+                display_mode = (display_mode + 1) % 2;  // Toggle between 0 and 1
+                return false;
+            }
+            break;
+    }
+
+    return true;
 }
 
 void housekeeping_task_user(void) {
@@ -736,5 +968,41 @@ void housekeeping_task_user(void) {
             transaction_rpc_send(USER_SYNC_CAPS_WORD, sizeof(is_caps_on), &is_caps_on);
         }
 #endif
+        static uint8_t mode = 0xFF;
+
+        if (mode != display_mode) {
+            mode = display_mode;
+            transaction_rpc_send(USER_SYNC_MODE, sizeof(mode), &mode);
+        }
+
+        //keylogger sync
+        static char last_sync_buffer[KEYLOGGER_SYNC_SIZE + 1] = {0};
+
+        // Only sync if terminal is visible
+        if (display_mode == 1) {
+            const char* current_buffer = keylogger_get_str();
+            uint16_t buffer_len = strlen(current_buffer);
+
+            // Get last 30 characters (or less)
+            uint16_t start_pos = (buffer_len > KEYLOGGER_SYNC_SIZE) ?
+                                 buffer_len - KEYLOGGER_SYNC_SIZE : 0;
+            uint16_t sync_len = buffer_len - start_pos;
+
+            char sync_buffer[KEYLOGGER_SYNC_SIZE + 1];
+            strncpy(sync_buffer, &current_buffer[start_pos], sync_len);
+            sync_buffer[sync_len] = '\0';
+
+            // Only send if buffer changed
+            if (strcmp(sync_buffer, last_sync_buffer) != 0) {
+                strncpy(last_sync_buffer, sync_buffer, KEYLOGGER_SYNC_SIZE);
+
+                keylogger_sync_t sync_data;
+                strncpy(sync_data.buffer, sync_buffer, KEYLOGGER_SYNC_SIZE);
+                sync_data.buffer[KEYLOGGER_SYNC_SIZE] = '\0';
+                sync_data.dirty = true;
+
+                transaction_rpc_send(USER_SYNC_KEYLOGGER, sizeof(sync_data), &sync_data);
+            }
+        }
     }
 }

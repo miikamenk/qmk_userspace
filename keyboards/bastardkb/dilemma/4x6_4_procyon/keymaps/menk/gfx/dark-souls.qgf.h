@@ -11,4 +11,4 @@
 #include <qp.h>
 
 extern const uint32_t gfx_dark_souls_length;
-extern const uint8_t  gfx_dark_souls[115248];
+extern const uint8_t  gfx_dark_souls[75948];

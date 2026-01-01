@@ -15,4 +15,4 @@ src += gfx/common.qgf.c
 src += gfx/font_oled.qff.c
 src += gfx/fonts.qff.c
 src += gfx/dark_souls.qgf.c
-src += gfx/mew.qgf.c
+src += keylogger.c
