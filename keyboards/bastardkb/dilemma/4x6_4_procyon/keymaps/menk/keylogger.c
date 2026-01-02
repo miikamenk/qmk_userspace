@@ -216,6 +216,24 @@ void keylogger_clear(void) {
     keylogger.dirty = true;
 }
 
+void keylogger_clear_buffer(void) {
+    keylogger.buffer[0] = '\0';
+    keylogger.index = 0;
+    keylogger.dirty = false;
+    keylogger.current_line = 0;
+
+    // Clear all lines
+    for (int i = 0; i < MAX_TERMINAL_LINES; i++) {
+        keylogger.lines[i][0] = '\0';
+        line_lengths[i] = 0;
+    }
+
+    // Also clear the last_sent_lines on master if we're the master
+    if (is_keyboard_master()) {
+        // This will be handled by the master-side code
+    }
+}
+
 // Get the current keylogger string
 const char *keylogger_get_str(void) {
     return keylogger.buffer;

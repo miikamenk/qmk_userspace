@@ -159,11 +159,6 @@ void user_sync_caps_word_recv(uint8_t in_buflen, const void* in_data, uint8_t ou
     }
 }
 
-void user_sync_mode_recv(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
-    if (in_buflen == sizeof(display_mode)) {
-        memcpy(&display_mode, in_data, sizeof(display_mode));
-    }
-}
 
 #ifdef RGB_MATRIX_ENABLE
 // Forward-declare this helper function since it is defined in rgb_matrix.c.
@@ -517,6 +512,28 @@ typedef struct {
     char line[TERMINAL_WIDTH];
     uint8_t sync_counter;  // To track sync sessions
 } keylogger_sync_t;
+
+
+void user_sync_mode_recv(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
+    if (in_buflen == sizeof(display_mode)) {
+        uint8_t new_mode;
+        memcpy(&new_mode, in_data, sizeof(new_mode));
+
+        // If switching away from terminal mode (1 → 0), clear the terminal
+        if (display_mode == 1 && new_mode == 0) {
+            for (int i = 0; i < MAX_TERMINAL_LINES; i++) {
+                terminal_lines[i].text[0] = '\0';
+                terminal_lines[i].length = 0;
+                terminal_lines[i].is_current = false;
+                terminal_lines[i].dirty = true;
+            }
+            // Force a redraw to clear the screen
+            keylogger_set_dirty(true);
+        }
+
+        memcpy(&display_mode, in_data, sizeof(display_mode));
+    }
+}
 
 void user_sync_keylogger_recv(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
     if (in_buflen >= sizeof(keylogger_sync_t)) {
@@ -945,6 +962,16 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
                 return false;
             }
             break;
+        case QK_USER_16:
+            if (record->event.pressed && display_mode == 1) {
+                keylogger_clear_buffer();
+                // Mark all lines as dirty for redraw
+                for (int i = 0; i < MAX_TERMINAL_LINES; i++) {
+                    terminal_lines[i].dirty = true;
+                }
+                keylogger_set_dirty(true);
+                return false;
+            }
     }
 
     return true;
@@ -1018,11 +1045,40 @@ void housekeeping_task_user(void) {
         static uint8_t last_current_line = 0xFF;
 
         if (mode != display_mode) {
+            // Store the old mode before updating
+            uint8_t old_mode = mode;
             mode = display_mode;
+
+            // If switching away from terminal mode (1 → 0), clear the buffer
+            if (old_mode == 1 && mode == 0) {
+                keylogger_clear_buffer();
+
+                // Clear last_sent_lines so we'll sync empty lines if we switch back
+                for (int i = 0; i < MAX_TERMINAL_LINES; i++) {
+                    last_sent_lines[i][0] = '\0';
+                }
+                last_current_line = 0xFF;
+
+                // Force a sync of empty lines to clear the slave's terminal
+                for (uint8_t line_num = 0; line_num < MAX_TERMINAL_LINES; line_num++) {
+                    keylogger_sync_t sync_data;
+                    sync_data.line[0] = '\0';  // Empty line
+                    sync_data.line_num = line_num;
+                    sync_data.current_line = 0;
+                    sync_data.sync_counter = sync_counter++;
+
+                    transaction_rpc_send(USER_SYNC_KEYLOGGER, sizeof(sync_data), &sync_data);
+                    wait_ms(1);  // Small delay to prevent overwhelming the bus
+                }
+            }
+
+            // If switching to terminal mode (0 → 1), force a fresh sync
+            if (old_mode == 0 && mode == 1) {
+                first_sync = true;
+                current_line_to_sync = 0;
+            }
+
             transaction_rpc_send(USER_SYNC_MODE, sizeof(mode), &mode);
-            first_sync = true;
-            sync_counter = 0;
-            current_line_to_sync = 0;
         }
 
         // BUFFERED KEYLOGGER SYNC - Throttled to prevent lag
@@ -1038,22 +1094,18 @@ void housekeeping_task_user(void) {
                         char current_line_text[TERMINAL_WIDTH + 1];
                         keylogger_get_line(line_num, current_line_text);
 
-                        // Only sync if line is not empty
-                        if (strlen(current_line_text) > 0 || line_num == current_line) {
-                            keylogger_sync_t sync_data;
-                            strncpy(sync_data.line, current_line_text, TERMINAL_WIDTH);
-                            sync_data.line_num = line_num;
-                            sync_data.current_line = current_line;
-                            sync_data.sync_counter = sync_counter++;
+                        keylogger_sync_t sync_data;
+                        strncpy(sync_data.line, current_line_text, TERMINAL_WIDTH);
+                        sync_data.line_num = line_num;
+                        sync_data.current_line = current_line;
+                        sync_data.sync_counter = sync_counter++;
 
-                            transaction_rpc_send(USER_SYNC_KEYLOGGER, sizeof(sync_data), &sync_data);
+                        transaction_rpc_send(USER_SYNC_KEYLOGGER, sizeof(sync_data), &sync_data);
 
-                            strncpy(last_sent_lines[line_num], current_line_text, TERMINAL_WIDTH);
-                            last_sent_lines[line_num][TERMINAL_WIDTH] = '\0';
+                        strncpy(last_sent_lines[line_num], current_line_text, TERMINAL_WIDTH);
+                        last_sent_lines[line_num][TERMINAL_WIDTH] = '\0';
 
-                            // Small delay between syncs to prevent overwhelming the bus
-                            wait_ms(1);
-                        }
+                        wait_ms(1);
                     }
                     last_current_line = current_line;
                     first_sync = false;

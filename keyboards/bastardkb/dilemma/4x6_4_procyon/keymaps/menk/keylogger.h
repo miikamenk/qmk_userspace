@@ -23,6 +23,7 @@ void keylogger_init(void);
 void keylogger_set_buffer(const char* new_buffer, uint16_t new_index);
 void keylogger_add_char(char c);
 void keylogger_clear(void);
+void keylogger_clear_buffer(void);
 const char *keylogger_get_str(void);
 bool keylogger_is_dirty(void);
 void keylogger_set_dirty(bool dirty);
