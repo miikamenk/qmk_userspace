@@ -503,12 +503,14 @@ typedef struct {
     char text[TERMINAL_WIDTH + 1];
     uint8_t length;
     bool is_current;  // Flag to mark current editing line
+    bool dirty;       // Flag to mark if line needs redraw
 } terminal_line_t;
 
 static terminal_line_t terminal_lines[MAX_TERMINAL_LINES];
 static bool terminal_initialized = false;
+static uint32_t last_terminal_redraw = 0;
 
-// keylogger sync stuff
+// Compressed keylogger sync structure
 typedef struct {
     uint8_t line_num;
     uint8_t current_line;
@@ -521,20 +523,22 @@ void user_sync_keylogger_recv(uint8_t in_buflen, const void *in_data, uint8_t ou
         const keylogger_sync_t* sync_data = (const keylogger_sync_t*)in_data;
 
         if (sync_data->line_num < MAX_TERMINAL_LINES) {
-            // Update the specific line
-            strncpy(terminal_lines[sync_data->line_num].text, sync_data->line, TERMINAL_WIDTH);
-            terminal_lines[sync_data->line_num].text[TERMINAL_WIDTH] = '\0';
-            terminal_lines[sync_data->line_num].length = strlen(terminal_lines[sync_data->line_num].text);
+            // Check if line actually changed
+            bool line_changed = strncmp(terminal_lines[sync_data->line_num].text, sync_data->line, TERMINAL_WIDTH) != 0;
+            bool current_changed = (terminal_lines[sync_data->line_num].is_current != (sync_data->line_num == sync_data->current_line));
 
-            // Update current line status for all lines
-            for (int i = 0; i < MAX_TERMINAL_LINES; i++) {
-                terminal_lines[i].is_current = (i == sync_data->current_line);
+            if (line_changed || current_changed) {
+                // Update the specific line
+                strncpy(terminal_lines[sync_data->line_num].text, sync_data->line, TERMINAL_WIDTH);
+                terminal_lines[sync_data->line_num].text[TERMINAL_WIDTH] = '\0';
+                terminal_lines[sync_data->line_num].length = strlen(terminal_lines[sync_data->line_num].text);
+                terminal_lines[sync_data->line_num].is_current = (sync_data->line_num == sync_data->current_line);
+                terminal_lines[sync_data->line_num].dirty = true;
             }
-
-            keylogger_set_dirty(true);
         }
     }
 }
+
 
 static void init_terminal_display(void) {
     // Clear terminal area
@@ -545,76 +549,99 @@ static void init_terminal_display(void) {
         terminal_lines[i].text[0] = '\0';
         terminal_lines[i].length = 0;
         terminal_lines[i].is_current = false;
+        terminal_lines[i].dirty = false;
     }
     terminal_initialized = true;
 }
+
 
 static void update_terminal_from_keylogger(void) {
     if (!is_keyboard_master()) return; // Only master updates its own display
 
     static char last_local_lines[MAX_TERMINAL_LINES][TERMINAL_WIDTH + 1] = {0};
-    static uint8_t last_local_current_line = 0xFF;
+    static bool last_current_lines[MAX_TERMINAL_LINES] = {false};
 
     uint8_t current_line = keylogger_get_current_line();
 
     for (int i = 0; i < MAX_TERMINAL_LINES; i++) {
         char line_buffer[TERMINAL_WIDTH + 1];
         keylogger_get_line(i, line_buffer);
+        bool is_current = (i == current_line);
 
         // Check if line changed or current line status changed
-        if (strcmp(line_buffer, last_local_lines[i]) != 0 ||
-            (i == current_line) != (i == last_local_current_line)) {
+        bool line_changed = strcmp(line_buffer, last_local_lines[i]) != 0;
+        bool current_changed = (is_current != last_current_lines[i]);
 
+        if (line_changed || current_changed) {
             strncpy(last_local_lines[i], line_buffer, TERMINAL_WIDTH);
             last_local_lines[i][TERMINAL_WIDTH] = '\0';
+            last_current_lines[i] = is_current;
 
             strncpy(terminal_lines[i].text, line_buffer, TERMINAL_WIDTH);
             terminal_lines[i].text[TERMINAL_WIDTH] = '\0';
             terminal_lines[i].length = strlen(terminal_lines[i].text);
-            terminal_lines[i].is_current = (i == current_line);
-
-            keylogger_set_dirty(true);
+            terminal_lines[i].is_current = is_current;
+            terminal_lines[i].dirty = true;
         }
     }
-
-    last_local_current_line = current_line;
 }
 
+static bool should_redraw_terminal(void) {
+    // Check if any line is dirty
+    for (int i = 0; i < MAX_TERMINAL_LINES; i++) {
+        if (terminal_lines[i].dirty) {
+            return true;
+        }
+    }
+    return false;
+}
 
 static void draw_terminal(void) {
     if (!terminal_initialized) {
         init_terminal_display();
     }
 
+    // If we're the master, update from our own keylogger
     if (is_keyboard_master()) {
         update_terminal_from_keylogger();
     }
 
-    // Clear terminal area
-    qp_rect(lcd, 9, 86, 239, 251, 85, 237, 59, true);
-
-    // Draw each line
-    for (int i = 0; i < MAX_TERMINAL_LINES; i++) {
-        if (terminal_lines[i].length > 0 || terminal_lines[i].is_current) {
-            uint16_t y = 87 + (i * (font_oled->line_height + 4));
-
-            // Draw the line
-            qp_drawtext_recolor(lcd, 10, y, font_oled, terminal_lines[i].text,
-                               0, 0, 0,        // Black text
-                               85, 237, 59);   // Green background
-
-            // Draw cursor on current line
-            if (terminal_lines[i].is_current) {
-                // Draw a simple cursor at the end of the line
-                uint16_t cursor_x = 10 + qp_textwidth(font_oled, terminal_lines[i].text);
-                qp_rect(lcd, cursor_x, y + font_oled->line_height - 2,
-                        cursor_x + 2, y + font_oled->line_height,
-                        0, 0, 0, true);
-            }
-        }
+    // Only redraw if enough time has passed and we have dirty lines
+    uint32_t now = timer_read32();
+    if (!should_redraw_terminal() || timer_elapsed32(last_terminal_redraw) < 33) { // ~30 FPS max
+        return;
     }
 
-    keylogger_set_dirty(false);
+    last_terminal_redraw = now;
+
+    // Don't clear entire area - only clear and redraw dirty lines
+    for (int i = 0; i < MAX_TERMINAL_LINES; i++) {
+        if (terminal_lines[i].dirty) {
+            uint16_t y = 87 + (i * (font_oled->line_height + 4));
+
+            // Clear the line area (from x=9 to x=239, line height + spacing)
+            qp_rect(lcd, 9, y - 2, 239, y + font_oled->line_height + 2,
+                   85, 237, 59, true);
+
+            if (terminal_lines[i].length > 0) {
+                // Draw the line
+                qp_drawtext_recolor(lcd, 10, y, font_oled, terminal_lines[i].text,
+                                   0, 0, 0,        // Black text
+                                   85, 237, 59);   // Green background
+
+                // Draw cursor on current line
+                if (terminal_lines[i].is_current) {
+                    // Draw a simple cursor at the end of the line
+                    uint16_t cursor_x = 10 + qp_textwidth(font_oled, terminal_lines[i].text);
+                    qp_rect(lcd, cursor_x, y + font_oled->line_height - 2,
+                           cursor_x + 2, y + font_oled->line_height,
+                           0, 0, 0, true);
+                }
+            }
+
+            terminal_lines[i].dirty = false;
+        }
+    }
 }
 
 
@@ -636,6 +663,7 @@ void ili9341_draw_user(void) {
     static uint16_t last_sdpi = 0xFFFF;
 #endif
     static uint8_t mode = 0xFF;
+    static uint32_t last_full_redraw = 0;
 
     uint16_t width, height;
     qp_get_geometry(lcd, &width, &height, NULL, NULL, NULL);
@@ -677,15 +705,24 @@ void ili9341_draw_user(void) {
 
     if (mode != display_mode || first_draw) {
         mode = display_mode;
-        draw_interface(display_mode);  // Pass the argument here!
+        draw_interface(display_mode);
         if (mode == 1) {
-            // Initialize terminal display (not keylogger - that should be done once)
+            // Re-initialize terminal when switching to terminal mode
             terminal_initialized = false;
+            init_terminal_display();
         }
     }
 
-    if (mode == 1 && (keylogger_is_dirty() || !terminal_initialized)) {
+    // Always try to draw terminal (it will self-throttle)
+    if (mode == 1) {
         draw_terminal();
+    }
+
+    // Throttle other UI updates to reduce flashing
+    if (timer_elapsed32(last_full_redraw) < 100 && !first_draw) {
+        qp_flush(lcd);
+        first_draw = false;
+        return;
     }
 
     uint16_t x = 4;
@@ -988,29 +1025,35 @@ void housekeeping_task_user(void) {
             current_line_to_sync = 0;
         }
 
-        // BUFFERED KEYLOGGER SYNC - One line at a time, round-robin
+        // BUFFERED KEYLOGGER SYNC - Throttled to prevent lag
         if (display_mode == 1) {
             uint8_t current_line = keylogger_get_current_line();
             uint32_t now = timer_read32();
 
-            // Throttle sync to every 8ms (~125 FPS max for sync)
-            if (timer_elapsed32(last_sync_time) > 8) {
+            // Throttle sync to every 16ms (~60 FPS max for sync)
+            if (timer_elapsed32(last_sync_time) > 16) {
                 // If first sync, sync all lines initially
                 if (first_sync) {
                     for (uint8_t line_num = 0; line_num < MAX_TERMINAL_LINES; line_num++) {
                         char current_line_text[TERMINAL_WIDTH + 1];
                         keylogger_get_line(line_num, current_line_text);
 
-                        keylogger_sync_t sync_data;
-                        strncpy(sync_data.line, current_line_text, TERMINAL_WIDTH);
-                        sync_data.line_num = line_num;
-                        sync_data.current_line = current_line;
-                        sync_data.sync_counter = sync_counter++;
+                        // Only sync if line is not empty
+                        if (strlen(current_line_text) > 0 || line_num == current_line) {
+                            keylogger_sync_t sync_data;
+                            strncpy(sync_data.line, current_line_text, TERMINAL_WIDTH);
+                            sync_data.line_num = line_num;
+                            sync_data.current_line = current_line;
+                            sync_data.sync_counter = sync_counter++;
 
-                        transaction_rpc_send(USER_SYNC_KEYLOGGER, sizeof(sync_data), &sync_data);
+                            transaction_rpc_send(USER_SYNC_KEYLOGGER, sizeof(sync_data), &sync_data);
 
-                        strncpy(last_sent_lines[line_num], current_line_text, TERMINAL_WIDTH);
-                        last_sent_lines[line_num][TERMINAL_WIDTH] = '\0';
+                            strncpy(last_sent_lines[line_num], current_line_text, TERMINAL_WIDTH);
+                            last_sent_lines[line_num][TERMINAL_WIDTH] = '\0';
+
+                            // Small delay between syncs to prevent overwhelming the bus
+                            wait_ms(1);
+                        }
                     }
                     last_current_line = current_line;
                     first_sync = false;
@@ -1024,8 +1067,8 @@ void housekeeping_task_user(void) {
                     bool line_changed = (strcmp(current_line_text, last_sent_lines[line_num]) != 0);
                     bool current_status_changed = (is_current != (line_num == last_current_line));
 
-                    // Always sync the current line, and sync others if they changed
-                    if (line_changed || current_status_changed || is_current) {
+                    // Only sync if something changed
+                    if (line_changed || current_status_changed) {
                         keylogger_sync_t sync_data;
                         strncpy(sync_data.line, current_line_text, TERMINAL_WIDTH);
                         sync_data.line_num = line_num;
