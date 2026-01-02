@@ -242,11 +242,17 @@ void draw_dpi_bar(
     bool sniping
 ) {
     char buf[16];
-    snprintf(buf, sizeof(buf), sniping ? "sdpi:%4u" : " dpi:%4u", dpi);
-    qp_drawtext(lcd, x, y, font, buf);
+    snprintf(buf, sizeof(buf), sniping ? "%3u" : "%4u", dpi);
+    qp_drawtext_recolor(
+        lcd, x, y, font_oled, buf,
+        0,
+        0,
+        0,
+        37, 40, 242
+    );
 
     // Calculate bar position and dimensions
-    uint16_t text_width = qp_textwidth(font, "sdpi:9999");
+    uint16_t text_width = sniping ? qp_textwidth(font, "999") : qp_textwidth(font, "9999");
     uint16_t bar_x = x + text_width + 4;
     uint16_t bar_y = y + (font->line_height / 2) - 2;
     uint16_t bar_h = 4;
@@ -279,8 +285,8 @@ void draw_dpi_bar(
     // You need to change /quantum/digitizer_mouse_fallback.c:64 to 3200 to match the keyboard's dpi steps
 
     const uint16_t normal_steps[] = {400, 600, 800, 1000, 1200, 1400, 1600,
-                                     2000, 2200, 2400, 2600, 2800, 3000, 3200};
-    const uint16_t normal_step_count = 14;
+                                     2000, 2200, 2400, 2600, 2800, 3000, 3200, 3400};
+    const uint16_t normal_step_count = 15;
 
     if (sniping) {
         // Find closest sniper step
@@ -306,7 +312,7 @@ void draw_dpi_bar(
                         bar_y,
                         bar_x + filled_width,
                         bar_y + bar_h,
-                        255, 90, 90,  // Red color for sniper mode
+                        90, 255, 255,  // Cyan color for normal mode
                         true);
             }
 
@@ -384,28 +390,28 @@ void painter_render_modifiers(painter_device_t device, painter_font_handle_t fon
         if (qp_drawimage_recolor(device, x, y, shift_icon,
                                  last_mods & shift ? user_hsv->secondary.h : user_hsv->primary.h,
                                  last_mods & shift ? user_hsv->secondary.s : user_hsv->primary.s,
-                                 last_mods & shift ? user_hsv->primary.v : disabled_val, 0, 0, 0)) {
+                                 last_mods & shift ? user_hsv->primary.v : disabled_val, 37, 40, 242)) {
             x += shift_icon->width + 2;
         }
 
         if (qp_drawimage_recolor(device, x, y, windows_icon,
                                  last_mods & gui ? user_hsv->secondary.h : user_hsv->primary.h,
                                  last_mods & gui ? user_hsv->secondary.s : user_hsv->primary.s,
-                                 last_mods & gui ? user_hsv->primary.v : disabled_val, 0, 0, 0)) {
+                                 last_mods & gui ? user_hsv->primary.v : disabled_val, 37, 40, 242)) {
             x += windows_icon->width + 2;
         }
 
         if (qp_drawimage_recolor(device, x, y, alt_icon,
                                  last_mods & alt ? user_hsv->secondary.h : user_hsv->primary.h,
                                  last_mods & alt ? user_hsv->secondary.s : user_hsv->primary.s,
-                                 last_mods & alt ? user_hsv->primary.v : disabled_val, 0, 0, 0)) {
+                                 last_mods & alt ? user_hsv->primary.v : disabled_val, 37, 40, 242)) {
             x += alt_icon->width + 2;
         }
 
         if (qp_drawimage_recolor(device, x, y, control_icon,
                                  last_mods & ctrl ? user_hsv->secondary.h : user_hsv->primary.h,
                                  last_mods & ctrl ? user_hsv->secondary.s : user_hsv->primary.s,
-                                 last_mods & ctrl ? user_hsv->primary.v : disabled_val, 0, 0, 0)) {
+                                 last_mods & ctrl ? user_hsv->primary.v : disabled_val, 37, 40, 242)) {
             x += control_icon->width + 2;
         }
     }
@@ -530,42 +536,27 @@ void painter_render_wpm_graph(painter_device_t device, painter_font_handle_t fon
 // }
 
 void draw_interface(uint8_t mode) {
-    qp_rect(lcd,   5,  65, 218,  73, 140, 173, 230, true);
-    qp_rect(lcd,   9,  76, 229,  84, 140, 173, 230, true);
+    qp_rect(lcd,   1, 134, 229, 142, 154, 255, 235, true); // bar background
     switch (mode) {
         case 0:
             // window 2 title
-            qp_drawtext_recolor(lcd, 6, 65, font_oled, "Terminal",
+            qp_drawtext_recolor(lcd, 2, 135, font_oled, "Dark Souls 3",
                         0,
                         0,
-                        0,
-                        140, 173, 230
+                        255,
+                        154, 255, 235
             );
-            // window 3 title
-            qp_drawtext_recolor(lcd, 10, 77, font_oled, "Dark Souls 3",
-                        0,
-                        0,
-                        0,
-                        140, 173, 230
-            );
-            qp_drawimage(lcd, 9, 86, dark_souls);
+            qp_drawimage(lcd, 3, 144, dark_souls);
             break;
         case 1:
             // window 2 title
-            qp_drawtext_recolor(lcd, 6, 65, font_oled, "Dark Souls 3",
+            qp_drawtext_recolor(lcd, 2, 135, font_oled, "C:\\WINDOWS\\system32\\cmd.exe",
                         0,
                         0,
-                        0,
-                        140, 173, 230
+                        255,
+                        154, 255, 235
             );
-            // window 3 title
-            qp_drawtext_recolor(lcd, 10, 77, font_oled, "Terminal",
-                        0,
-                        0,
-                        0,
-                        140, 173, 230
-            );
-            qp_rect(lcd,  9,  86, 239, 251,  85, 237,  59, true);
+            qp_rect(lcd,   1, 144, 238, 318, 0,   0,   0, true); // window background (black for terminal)
             //keylogger output goes here 10, 87, 239, 251
             break;
     }
@@ -641,7 +632,7 @@ void user_sync_keylogger_recv(uint8_t in_buflen, const void *in_data, uint8_t ou
 
 static void init_terminal_display(void) {
     // Clear terminal area
-    qp_rect(lcd, 9, 86, 239, 251, 85, 237, 30, true);
+    qp_rect(lcd,   1, 144, 238, 318, 0,   0,   0, true); // window background (black for terminal)
 
     // Initialize line buffers
     for (int i = 0; i < MAX_TERMINAL_LINES; i++) {
@@ -716,17 +707,17 @@ static void draw_terminal(void) {
     // Don't clear entire area - only clear and redraw dirty lines
     for (int i = 0; i < MAX_TERMINAL_LINES; i++) {
         if (terminal_lines[i].dirty) {
-            uint16_t y = 87 + (i * (font_oled->line_height + 4));
+            uint16_t y = 146 + (i * (font_oled->line_height + 4));
 
             // Clear the line area (from x=9 to x=239, line height + spacing)
-            qp_rect(lcd, 9, y - 2, 239, y + font_oled->line_height + 2,
-                   85, 237, 30, true);
+            qp_rect(lcd, 3, y - 2, 239, y + font_oled->line_height + 2,
+                   0,   0,   0, true);
 
             if (terminal_lines[i].length > 0) {
                 // Draw the line
                 qp_drawtext_recolor(lcd, 10, y, font_oled, terminal_lines[i].text,
-                                   85, 20, 255,        // Black text
-                                   85, 237, 30);   // Green background
+                                   85,   0, 255,        // Black text
+                                    0,   0,   0);   // Green background
             }
 
             terminal_lines[i].dirty = false;
@@ -764,46 +755,40 @@ void ili9341_draw_user(void) {
         qp_rect(lcd, 0, 0, width, height, 0, 0, 0, true);
 
         // window #1
-        qp_line(lcd,   0,  53, 218,  53, 140,  86, 255); // top
-        qp_line(lcd,   0,  53,   0, 196, 140,  86, 255); // left
-        qp_line(lcd,   1,  63, 219,  63, 140, 226, 150); // bar bottom
-        qp_line(lcd, 219,  53, 219,  64, 140, 226, 150); // right
-        qp_line(lcd,   0, 195,   3, 195, 140, 226, 150); // window bottom
-        qp_rect(lcd,   1,  56,   4, 194, 255,   0, 120, true); // window background
-        qp_rect(lcd,   1,  54, 209,  62, 140, 173, 230, true); // bar background
-        qp_rect(lcd, 210,  54, 218,  62, 255,   0, 230, false); // bar x border
-        qp_rect(lcd, 211,  55, 217,  61, 255, 255, 230, true); // bar x background
-        qp_line(lcd, 212,  56, 216,  60, 255,   0, 255); // bar x
-        qp_line(lcd, 212,  60, 216,  56, 255,   0, 255); // bar x
-        qp_drawtext_recolor(lcd, 2, 54, font_oled, "Internet Explorer",
+        // borders
+        qp_line(lcd,   0,   0, 238,   0, 154, 173, 255); // top
+        qp_line(lcd,   0,   0,   0, 131, 154, 173, 255); // left
+        qp_line(lcd, 239,   0, 239, 131, 154, 255, 128); // right
+        qp_line(lcd,   1, 131, 239, 131, 154, 255, 128); // window bottom
+        qp_rect(lcd,   1,  11, 238, 130,  37,  40, 242, true); // window background
+        // bar
+        qp_line(lcd,   1,  10, 239,  10, 154, 255, 128); // bar bottom
+        qp_rect(lcd,   1,   1, 229,   9, 154, 255, 235, true); // bar background
+        // bar buttons
+        qp_rect(lcd, 230,   1, 238,   9, 255,   0, 230, false); // bar x border
+        qp_rect(lcd, 231,   2, 237,   8, 255, 255, 230, true); // bar x background
+        qp_line(lcd, 232,   3, 236,   7, 255,   0, 255); // bar x
+        qp_line(lcd, 232,   7, 236,   3, 255,   0, 255); // bar x
+        qp_drawtext_recolor(lcd, 2, 1, font_oled, "System Information",
                     0,
                     0,
-                    0,
-                    140, 173, 230
+                    255,
+                    154, 255, 235
         );
-        // window #2
-        qp_line(lcd,   4,  64, 227,  64, 140,  86, 255); // top
-        qp_line(lcd,   4,  64,   4, 228, 140,  86, 255); // left
-        qp_line(lcd,   5,  74, 228,  74, 140,  89, 150); // bar bottom
-        qp_line(lcd, 228,  64, 228,  73, 140, 226, 150); // right
-        qp_line(lcd,   4, 228,   7, 228, 140, 226, 150); // window bottom
-        qp_rect(lcd,   5,  67,   8, 227, 255,   0, 120, true); // window background
-        qp_rect(lcd,   5,  65, 218,  73, 140, 173, 230, true); // bar background
-        qp_rect(lcd, 219,  65, 227,  73, 255,   0, 230, false); // bar x border
-        qp_rect(lcd, 220,  66, 226,  72, 255, 255, 230, true); // bar x background
-        qp_line(lcd, 221,  67, 225,  71, 255,   0, 255); // bar x
-        qp_line(lcd, 221,  71, 225,  67, 255,   0, 255); // bar x
-        // window #3
-        qp_line(lcd,   8,  75, 238,  75, 140,  86, 255); // top
-        qp_line(lcd,   8,  75,   8, 252, 140,  86, 255); // left
-        qp_line(lcd,   9,  85, 239,  85, 140, 226, 150); // bar bottom
-        qp_line(lcd, 239,  75, 239, 252, 140, 226, 150); // right
-        qp_line(lcd,   8, 252, 239, 252, 140, 226, 150); // window bottom
-        qp_rect(lcd,   9,  76, 229,  84, 140, 173, 230, true); // bar background
-        qp_rect(lcd, 230,  76, 238,  84, 255,   0, 230, false); // bar x border
-        qp_rect(lcd, 231,  77, 237,  83, 255, 255, 230, true); // bar x background
-        qp_line(lcd, 232,  78, 236,  82, 255,   0, 255); // bar x
-        qp_line(lcd, 232,  82, 236,  78, 255,   0, 255); // bar x
+        // window #2 (terminal, dark souls)
+        // borders
+        qp_line(lcd,   0, 133, 238, 133, 154, 173, 255); // top
+        qp_line(lcd,   0, 133,   0, 319, 154, 173, 255); // left
+        qp_line(lcd, 239, 133, 239, 319, 154, 255, 128); // right
+        qp_line(lcd,   0, 319, 239, 319, 154, 255, 128); // window bottom
+        // bar
+        qp_line(lcd,   1, 143, 239, 143, 154, 255, 128); // bar bottom
+        qp_rect(lcd,   1, 134, 229, 142, 154, 255, 235, true); // bar background
+        // bar buttons
+        qp_rect(lcd, 230, 134, 238, 142, 255,   0, 230, false); // bar x border
+        qp_rect(lcd, 231, 135, 237, 141, 255, 255, 230, true); // bar x background
+        qp_line(lcd, 232, 136, 236, 140, 255,   0, 255); // bar x
+        qp_line(lcd, 232, 140, 236, 136, 255,   0, 255); // bar x
     }
 
     if (mode != display_mode || first_draw) {
@@ -828,71 +813,22 @@ void ili9341_draw_user(void) {
         return;
     }
 
-    uint16_t x = 4;
-    uint16_t y = height - font_oled->line_height - 4;
+
+    uint16_t x = 8;
+    uint16_t y = 13;
     char buf[32];
 
-    painter_render_modifiers(
-        lcd,               // painter_device_t
-        font_oled,         // font (used for "Modifiers:" label)
-        x,                 // x start
-        y,                 // y start
-        width,             // available width
-        first_draw,        // force redraw on first frame
-        &user_hsv,         // HSV theme struct
-        80                 // disabled_val (dimmed brightness)
-    );
-
-
-    x = 55;
-
-#if defined (CAPS_WORD_ENABLE)
-    bool caps = is_caps_on;
-    if (last_caps != caps || first_draw) {
-        uint16_t text_width  = qp_textwidth(font_oled, "CAPS OFF"); // max expected length
-        uint16_t text_height = font_oled->line_height;
-        qp_rect(lcd, x, y, x + text_width, y + text_height - 1, 0, 0, 0, true); // fill with background
-
-        // Draw new caps word state
-        last_caps = caps;
-        snprintf(buf, sizeof(buf), "CAPS %s", caps ? "ON" : "OFF");
-        qp_drawtext_recolor(lcd, x, y, font_oled, buf,
-                    caps ? user_hsv.secondary.h : user_hsv.primary.h,
-                    caps ? user_hsv.secondary.s : user_hsv.primary.s,
-                    caps ? user_hsv.secondary.v : user_hsv.primary.v,
-                    0, 0, 0
+    if (first_draw) {
+        qp_drawtext_recolor(
+            lcd, x, y, font_oled, "Layer",
+            0,
+            0,
+            0,
+            37, 40, 242
         );
     }
-#endif
-    x = 4;
-    y = 256;
-#ifdef WPM_ENABLE
-    uint16_t wpm = get_current_wpm();
-    uint16_t text_width  = qp_textwidth(font_oled, "WPM: 999"); // max expected digits
-    uint16_t text_height = font_oled->line_height;
-    if (last_wpm != wpm || first_draw) {
-        // Clear previous WPM text area
-        qp_rect(lcd, x, y, x + text_width, y + text_height - 1, 0, 0, 0, true); // fill with background
 
-        //wpm_animation(wpm, last_wpm);
-
-        // Draw new WPM
-        last_wpm = wpm;
-        snprintf(buf, sizeof(buf), "WPM: %3u", last_wpm);
-        qp_drawtext_recolor(lcd, x, y, font_oled, buf,
-                    user_hsv.secondary.h,
-                    user_hsv.secondary.s,
-                    user_hsv.secondary.v,
-                    0, 0, 0
-        );
-    }
-    painter_render_wpm_graph(lcd, font_oled, x, y + text_height + 6, text_width + 5, text_height * 4, false, &user_hsv);
-    x += qp_textwidth(font_oled, "WPM: 999") + 4;
-#endif
-
-
-    x = 4;
-    y = 6;
+    y += font_oled->line_height + 6;
 
     uint8_t layer = get_highest_layer(layer_state);
 
@@ -908,79 +844,95 @@ void ili9341_draw_user(void) {
             y,
             x + text_width,
             y + text_height - 1,
-            0, 0, 0, true
+            37, 40, 242, true
         );
 
         switch (layer) {
             case 1:
                 qp_drawtext_recolor(
                     lcd, x, y, font_oled, "01 FUNC",
-                    user_hsv.primary.h,
-                    user_hsv.primary.s,
-                    user_hsv.primary.v,
-                    0, 0, 0
+                    0,
+                    0,
+                    0,
+                    37, 40, 242
                 );
                 break;
 
             case 2:
                 qp_drawtext_recolor(
                     lcd, x, y, font_oled, "02 NAV",
-                    user_hsv.primary.h,
-                    user_hsv.primary.s,
-                    user_hsv.primary.v,
-                    0, 0, 0
+                    0,
+                    0,
+                    0,
+                    37, 40, 242
                 );
                 break;
 
             case 3:
                 qp_drawtext_recolor(
                     lcd, x, y, font_oled, "03 MOUSE",
-                    user_hsv.primary.h,
-                    user_hsv.primary.s,
-                    user_hsv.primary.v,
-                    0, 0, 0
+                    0,
+                    0,
+                    0,
+                    37, 40, 242
                 );
                 break;
 
             case 4:
                 qp_drawtext_recolor(
                     lcd, x, y, font_oled, "04 CUST",
-                    user_hsv.primary.h,
-                    user_hsv.primary.s,
-                    user_hsv.primary.v,
-                    0, 0, 0
+                    0,
+                    0,
+                    0,
+                    37, 40, 242
                 );
                 break;
 
             default:
                 qp_drawtext_recolor(
                     lcd, x, y, font_oled, "00 BASE",
-                    user_hsv.primary.h,
-                    user_hsv.primary.s,
-                    user_hsv.primary.v,
-                    0, 0, 0
+                    0,
+                    0,
+                    0,
+                    37, 40, 242
                 );
                 break;
         }
     }
 
-    x += qp_textwidth(font_oled, "03 MOUSE") + 4;
+    y = 13;
+    x += qp_textwidth(font_oled, "03 MOUSE") + 8;
+
+    if (first_draw) {
+        qp_drawtext_recolor(
+            lcd, x, y, font_oled, "DPI",
+            0,
+            0,
+            0,
+            37, 40, 242
+        );
+    }
+
+    y += font_oled->line_height + 6;
+
+
 #if defined(POINTING_DEVICE_ENABLE)
     uint16_t dpi = dpi_state.dpi;
     uint16_t sniping_dpi = dpi_state.sniping_dpi;
     if (last_dpi != dpi) {
         last_dpi = dpi;
-        draw_dpi_bar(x, y, dpi, width, font_oled, false);
+        draw_dpi_bar(x, y, dpi, x + (width / 2) - 8, font_oled, false);
     }
-    y += font_oled->line_height + 4;
+    x = x + (width / 2) - 4;
     if (last_sdpi != sniping_dpi) {
         last_sdpi = sniping_dpi;
-        draw_dpi_bar(x, y, sniping_dpi, width, font_oled, true);
+        draw_dpi_bar(x, y, sniping_dpi, width - 8, font_oled, true);
     }
 #endif
 
-    y = 6 + font_oled->line_height + 4;
-    x = 4;
+
+    y = 11 + (font_oled->line_height * 2) + 12;
+    x = 8;
 
 
 #if defined(RGB_MATRIX_ENABLE)
@@ -994,15 +946,15 @@ void ili9341_draw_user(void) {
 
         if (first_draw) {
             qp_drawtext_recolor(
-                lcd, x, y, font_oled, "RGB:",
-                user_hsv.secondary.h,
-                user_hsv.secondary.s,
-                user_hsv.secondary.v,
-                0, 0, 0
+                lcd, x, y, font_oled, "RGB",
+                0,
+                0,
+                0,
+                37, 40, 242
             );
         }
 
-        y += font_oled->line_height + 4;
+        y += font_oled->line_height + 6;
 
         last_rgb = current_mode;
         last_rgb_hsv = current_hsv;
@@ -1018,7 +970,7 @@ void ili9341_draw_user(void) {
             y,
             x + text_width,
             y + text_height,
-            0, 0, 0,
+            37, 40, 242,
             true
         );
 
@@ -1026,10 +978,10 @@ void ili9341_draw_user(void) {
         snprintf(buf, sizeof(buf), "%s", rgb_matrix_get_effect_name());
         qp_drawtext_recolor(
             lcd, x, y, font_oled, buf,
-            user_hsv.secondary.h,
-            user_hsv.secondary.s,
-            user_hsv.secondary.v,
-            0, 0, 0
+            0,
+            0,
+            0,
+            37, 40, 242
         );
 
         y += font_oled->line_height + 4;
@@ -1040,7 +992,7 @@ void ili9341_draw_user(void) {
             y,
             x + hsv_width,
             y + text_height,
-            0, 0, 0,
+            37, 40, 242,
             true
         );
 
@@ -1058,10 +1010,10 @@ void ili9341_draw_user(void) {
             y,
             font_oled,
             buf,
-            user_hsv.secondary.h,
-            user_hsv.secondary.s,
-            user_hsv.secondary.v,
-            0, 0, 0
+            0,
+            0,
+            0,
+            37, 40, 242
         );
 
         /* HSV color swatch */
@@ -1078,6 +1030,110 @@ void ili9341_draw_user(void) {
         );
     }
 #endif
+
+
+    y = 11 + (font_oled->line_height * 2) + 12;
+    x += qp_textwidth(font_oled, "XXXXXXXXXXXXXXXXXXXXXXXXX") + 8;
+
+    if (first_draw) {
+        qp_drawtext_recolor(
+            lcd, x, y, font_oled, "Modifiers",
+            0,
+            0,
+            0,
+            37, 40, 242
+        );
+    }
+
+    y += font_oled->line_height + 6;
+
+    painter_render_modifiers(
+        lcd,               // painter_device_t
+        font_oled,         // font (used for "Modifiers:" label)
+        x,                 // x start
+        y,                 // y start
+        width,             // available width
+        first_draw,        // force redraw on first frame
+        &user_hsv,         // HSV theme struct
+        80                 // disabled_val (dimmed brightness)
+    );
+
+
+    y += font_oled->line_height + 4;
+
+#if defined (CAPS_WORD_ENABLE)
+    bool caps = is_caps_on;
+    if (last_caps != caps || first_draw) {
+        uint16_t text_width  = qp_textwidth(font_oled, "CAPS OFF"); // max expected length
+        uint16_t text_height = font_oled->line_height;
+        qp_rect(lcd, x, y, x + text_width, y + text_height - 1, 37, 40, 242, true); // fill with background
+
+        // Draw new caps word state
+        last_caps = caps;
+        snprintf(buf, sizeof(buf), "CAPS %s", caps ? "ON" : "OFF");
+        qp_drawtext_recolor(lcd, x, y, font_oled, buf,
+                    caps ? 0 : 0,
+                    caps ? 255 : 0,
+                    caps ? 230 : 0,
+                    37, 40, 242
+        );
+    }
+#endif
+    x = 8;
+    y += font_oled->line_height + 6;
+
+    if (first_draw) {
+        qp_drawtext_recolor(
+            lcd, x, y, font_oled, "WPM",
+            0,
+            0,
+            0,
+            37, 40, 242
+        );
+    }
+
+    x += (qp_textwidth(font_oled, "999") * 4) + 8;
+
+    if (first_draw) {
+        qp_drawtext_recolor(
+            lcd, x, y, font_oled, "WPM GRAPH",
+            0,
+            0,
+            0,
+            37, 40, 242
+        );
+    }
+    x = 8;
+    y += font_oled->line_height + 6;
+
+#ifdef WPM_ENABLE
+    uint16_t wpm = get_current_wpm();
+    uint16_t text_width  = qp_textwidth(font_oled, "999"); // max expected digits
+    uint16_t text_height = font_oled->line_height;
+    if (last_wpm != wpm || first_draw) {
+        // Clear previous WPM text area
+        qp_rect(lcd, x, y, x + (text_width * 3), y + (text_height * 4), 0, 0, 0, true); // fill with background
+
+        //wpm_animation(wpm, last_wpm);
+
+        // Draw new WPM
+        last_wpm = wpm;
+        snprintf(buf, sizeof(buf), "%3u", last_wpm);
+        qp_drawtext_recolor(lcd, x + text_width, y + (text_height * 3), font_oled, buf,
+                    85,
+                    180,
+                    194,
+                    0, 0, 0
+        );
+    }
+    x += (text_width * 4) + 8;
+    painter_render_wpm_graph(lcd, font_oled, x, y, width - x - 8, text_height * 4, false, &user_hsv);
+    x += qp_textwidth(font_oled, "WPM: 999") + 4;
+#endif
+
+
+
+
     first_draw = false;
     qp_flush(lcd);
 }
