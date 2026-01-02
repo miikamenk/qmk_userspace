@@ -255,26 +255,19 @@ char keycode_to_char(uint16_t keycode, bool shift, bool caps) {
     if (shift) {
         switch (keycode) {
             case KC_1: return '!';
-            case KC_2: return '@';
+            case KC_2: return '"';
             case KC_3: return '#';
-            case KC_4: return '$';
+            case KC_4: return '*';
             case KC_5: return '%';
-            case KC_6: return '^';
-            case KC_7: return '&';
-            case KC_8: return '*';
-            case KC_9: return '(';
-            case KC_0: return ')';
-            case KC_MINS: return '_';
-            case KC_EQL: return '+';
-            case KC_LBRC: return '{';
-            case KC_RBRC: return '}';
-            case KC_BSLS: return '|';
-            case KC_SCLN: return ':';
-            case KC_QUOT: return '"';
-            case KC_GRV: return '~';
-            case KC_COMM: return '<';
-            case KC_DOT: return '>';
-            case KC_SLSH: return '?';
+            case KC_6: return '&';
+            case KC_7: return '/';
+            case KC_8: return '(';
+            case KC_9: return ')';
+            case KC_0: return '=';
+            case KC_SLSH: return '_';
+            case KC_MINS: return '?';
+            case KC_COMM: return ';';
+            case KC_DOT: return ':';
         }
     }
 
@@ -298,15 +291,12 @@ char keycode_to_char(uint16_t keycode, bool shift, bool caps) {
         case KC_SPC: return ' ';
         case KC_MINS: return '-';
         case KC_EQL: return '=';
-        case KC_LBRC: return '[';
-        case KC_RBRC: return ']';
-        case KC_BSLS: return '\\';
-        case KC_SCLN: return ';';
-        case KC_QUOT: return '\'';
-        case KC_GRV: return '`';
+        case KC_BSLS: return '\'';
+        case KC_SCLN: return 'o';
+        case KC_QUOT: return 'a';
         case KC_COMM: return ',';
         case KC_DOT: return '.';
-        case KC_SLSH: return '/';
+        case KC_SLSH: return '-';
         case KC_ENT: return '\n';
         case KC_TAB: return '\t';
         default: return 0;
