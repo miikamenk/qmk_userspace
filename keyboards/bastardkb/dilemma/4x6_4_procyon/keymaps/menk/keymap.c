@@ -447,7 +447,7 @@ void painter_render_wpm_graph(painter_device_t device, painter_font_handle_t fon
         const graph_line_t lines[] = {
             {
                 .data      = wpm_graph_samples,
-                .color     = curr_hsv->secondary,
+                .color     = {.h = 85, .s = 180, .v = 194},
                 .mode      = LINE,
                 .max_value = 120,
             },
@@ -709,19 +709,58 @@ static void draw_terminal(void) {
         if (terminal_lines[i].dirty) {
             uint16_t y = 146 + (i * (font_oled->line_height + 4));
 
-            // Clear the line area (from x=9 to x=239, line height + spacing)
-            qp_rect(lcd, 3, y - 2, 239, y + font_oled->line_height + 2,
+            // Clear the line area (from x=9 to x=238, line height + spacing)
+            qp_rect(lcd, 3, y - 2, 238, y + font_oled->line_height + 2,
                    0,   0,   0, true);
 
             if (terminal_lines[i].length > 0) {
                 // Draw the line
-                qp_drawtext_recolor(lcd, 10, y, font_oled, terminal_lines[i].text,
+                qp_drawtext_recolor(lcd, 6, y, font_oled, terminal_lines[i].text,
                                    85,   0, 255,        // Black text
                                     0,   0,   0);   // Green background
             }
 
             terminal_lines[i].dirty = false;
         }
+    }
+}
+
+void draw_wpm_indicator(uint16_t x, uint16_t y, uint16_t text_width, uint16_t text_height, uint16_t wpm) {
+    // Base y position for the indicator
+    uint16_t base_y = y + (text_height * 3);
+
+    // Define the two sections (left and right) x coordinates
+    uint16_t left_start_x = x + text_width - 2;
+    uint16_t left_end_x = x + text_width + 8;
+    uint16_t right_start_x = x + text_width + 10;
+    uint16_t right_end_x = x + text_width + 20;
+
+    // Calculate how many lines to draw with active color based on WPM
+    // Each active line represents a WPM threshold
+    uint8_t active_lines = 0;
+    if (wpm > 20) active_lines = 2;
+    if (wpm > 40) active_lines = 4;
+    if (wpm > 60) active_lines = 6;
+    if (wpm > 80) active_lines = 8;
+    if (wpm > 100) active_lines = 10;
+    if (wpm > 120) active_lines = 12;
+    if (wpm > 140) active_lines = 14;
+    if (wpm > 160) active_lines = 16;
+
+    // Draw 8 levels (each level has 2 lines: top and bottom, making 16 lines total)
+    for (int i = 0; i < 8; i++) {
+        // Calculate y positions for this level's two lines
+        uint16_t y_bottom = base_y - 5 - (i * 2);
+
+        // Determine color for this level (first two lines active if wpm > 20, etc.)
+        uint8_t color_green = 80; // Default color
+        if (active_lines > (i * 2)) {
+            color_green = 194; // Active color
+        }
+
+        // Draw bottom line of this level (left and right segments)
+        qp_line(lcd, left_start_x, y_bottom, left_end_x, y_bottom, 85, 180, color_green);
+        qp_line(lcd, right_start_x, y_bottom, right_end_x, y_bottom, 85, 180, color_green);
     }
 }
 
@@ -819,6 +858,7 @@ void ili9341_draw_user(void) {
     char buf[32];
 
     if (first_draw) {
+        qp_rect(lcd, x-3, y+4, x + qp_textwidth(font_oled, "03 MOUSE") + 3, y +(font_oled->line_height * 2) + 8, 0, 0, 0, false);
         qp_drawtext_recolor(
             lcd, x, y, font_oled, "Layer",
             0,
@@ -901,9 +941,10 @@ void ili9341_draw_user(void) {
     }
 
     y = 13;
-    x += qp_textwidth(font_oled, "03 MOUSE") + 8;
+    x += qp_textwidth(font_oled, "03 MOUSE") + 11;
 
     if (first_draw) {
+        qp_rect(lcd, x-3, y+4, width - 8, y +(font_oled->line_height * 2) + 8, 0, 0, 0, false);
         qp_drawtext_recolor(
             lcd, x, y, font_oled, "DPI",
             0,
@@ -931,7 +972,7 @@ void ili9341_draw_user(void) {
 #endif
 
 
-    y = 11 + (font_oled->line_height * 2) + 12;
+    y = 13 + (font_oled->line_height * 2) + 12;
     x = 8;
 
 
@@ -945,6 +986,7 @@ void ili9341_draw_user(void) {
         last_rgb_hsv.v != current_hsv.v) {
 
         if (first_draw) {
+            qp_rect(lcd, x-3, y+4, x + qp_textwidth(font_oled, "XXXXXXXXXXXXXXXXXXXXXXXXX") + 3, y + (font_oled->line_height * 3) + 14, 0, 0, 0, false);
             qp_drawtext_recolor(
                 lcd, x, y, font_oled, "RGB",
                 0,
@@ -1033,9 +1075,10 @@ void ili9341_draw_user(void) {
 
 
     y = 11 + (font_oled->line_height * 2) + 12;
-    x += qp_textwidth(font_oled, "XXXXXXXXXXXXXXXXXXXXXXXXX") + 8;
+    x += qp_textwidth(font_oled, "XXXXXXXXXXXXXXXXXXXXXXXXX") + 11;
 
     if (first_draw) {
+        qp_rect(lcd, x-3, y+4, width - 8, y + (font_oled->line_height * 3) + 14, 0, 0, 0, false);
         qp_drawtext_recolor(
             lcd, x, y, font_oled, "Modifiers",
             0,
@@ -1080,9 +1123,10 @@ void ili9341_draw_user(void) {
     }
 #endif
     x = 8;
-    y += font_oled->line_height + 6;
+    y += font_oled->line_height + 11;
 
     if (first_draw) {
+        qp_rect(lcd, x-3, y+4, (x + qp_textwidth(font_oled, "XXX") * 3) + 3, y + (font_oled->line_height * 4) + 14, 0, 0, 0, false);
         qp_drawtext_recolor(
             lcd, x, y, font_oled, "WPM",
             0,
@@ -1092,9 +1136,10 @@ void ili9341_draw_user(void) {
         );
     }
 
-    x += (qp_textwidth(font_oled, "999") * 4) + 8;
+    x += (qp_textwidth(font_oled, "999") * 4) + 11;
 
     if (first_draw) {
+        qp_rect(lcd, x-3, y+4, width - 8, y + (font_oled->line_height * 4) + 14, 0, 0, 0, false);
         qp_drawtext_recolor(
             lcd, x, y, font_oled, "WPM GRAPH",
             0,
@@ -1104,7 +1149,7 @@ void ili9341_draw_user(void) {
         );
     }
     x = 8;
-    y += font_oled->line_height + 6;
+    y += font_oled->line_height + 2;
 
 #ifdef WPM_ENABLE
     uint16_t wpm = get_current_wpm();
@@ -1112,10 +1157,14 @@ void ili9341_draw_user(void) {
     uint16_t text_height = font_oled->line_height;
     if (last_wpm != wpm || first_draw) {
         // Clear previous WPM text area
-        qp_rect(lcd, x, y, x + (text_width * 3), y + (text_height * 4), 0, 0, 0, true); // fill with background
+        if (first_draw) {
+            qp_rect(lcd, x, y, x + (text_width * 3), y + (text_height * 4), 0, 0, 0, true); // fill with background
+        }
 
+        qp_rect(lcd, x + text_width, y + (text_height * 3), x + (text_width * 2), y + (text_height * 4), 0, 0, 0, true); // fill with background
         //wpm_animation(wpm, last_wpm);
 
+        draw_wpm_indicator(x, y, text_width, text_height, wpm);
         // Draw new WPM
         last_wpm = wpm;
         snprintf(buf, sizeof(buf), "%3u", last_wpm);
@@ -1125,14 +1174,12 @@ void ili9341_draw_user(void) {
                     194,
                     0, 0, 0
         );
+
     }
-    x += (text_width * 4) + 8;
-    painter_render_wpm_graph(lcd, font_oled, x, y, width - x - 8, text_height * 4, false, &user_hsv);
+    x += (text_width * 4) + 11;
+    painter_render_wpm_graph(lcd, font_oled, x, y, width - x - 11, text_height * 4, false, &user_hsv);
     x += qp_textwidth(font_oled, "WPM: 999") + 4;
 #endif
-
-
-
 
     first_draw = false;
     qp_flush(lcd);

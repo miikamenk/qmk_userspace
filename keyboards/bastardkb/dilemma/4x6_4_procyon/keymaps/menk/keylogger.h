@@ -4,8 +4,8 @@
 #include "action.h"
 
 // Keylogger configuration
-#define KEYLOGGER_BUFFER_SIZE 324
-#define TERMINAL_WIDTH 36
+#define KEYLOGGER_BUFFER_SIZE 400
+#define TERMINAL_WIDTH 38
 #define MAX_TERMINAL_LINES 9
 #define MAX_LINE_LENGTH TERMINAL_WIDTH
 
