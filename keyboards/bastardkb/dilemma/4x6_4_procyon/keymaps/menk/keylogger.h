@@ -4,9 +4,9 @@
 #include "action.h"
 
 // Keylogger configuration
-#define KEYLOGGER_BUFFER_SIZE 400
+#define KEYLOGGER_BUFFER_SIZE 645
 #define TERMINAL_WIDTH 38
-#define MAX_TERMINAL_LINES 9
+#define MAX_TERMINAL_LINES 14
 #define MAX_LINE_LENGTH TERMINAL_WIDTH
 
 // Keylogger buffer structure
@@ -32,3 +32,5 @@ char keycode_to_char(uint16_t keycode, bool shift, bool caps);
 void keylogger_get_line(uint8_t line_num, char *buffer);
 void keylogger_set_line(uint8_t line_num, const char *line);
 uint8_t keylogger_get_current_line(void);
+void keylogger_add_char_with_modifiers(char c, bool ctrl, bool win, bool alt);
+void keylogger_get_modifier_states(bool *ctrl, bool *win, bool *alt);
