@@ -213,10 +213,8 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 #    include "qp_comms.h"
 #    include "color.h"
 #    include "gfx/common.qgf.c"
-#    include "gfx/dark-souls.qgf.c"
+#    include "gfx/bloodborne.qgf.c"
 #    include "gfx/font_oled.qff.c"
-#    include "gfx/fonts.qff.c"
-#    include "gfx/mew.qgf.c"
 
 
 typedef struct {
@@ -230,7 +228,7 @@ painter_device_t lcd;
 painter_font_handle_t         font_oled;
 painter_font_handle_t         font_menu;
 static painter_image_handle_t shift_icon, control_icon, alt_icon,  windows_icon;
-static painter_image_handle_t dark_souls;
+static painter_image_handle_t bloodborne;
 #endif // QUANTUM_PAINTER_ENABLE
 
 void draw_dpi_bar(
@@ -468,85 +466,18 @@ void painter_render_wpm_graph(painter_device_t device, painter_font_handle_t fon
 #endif // WPM_ENABLE
 }
 
-
-// removed for now, keeping here if I add a different wpm animation
-// void wpm_animation(uint16_t wpm, uint16_t last_wpm) {
-//     // Clean up animations when transitioning between states
-//     if (wpm < 20) {
-//         // Coming from higher WPM states to sleep
-//         if (mew_twirl_token != INVALID_DEFERRED_TOKEN) {
-//             qp_stop_animation(mew_twirl_token);
-//             mew_twirl_token = INVALID_DEFERRED_TOKEN;
-//         }
-//         if (mew_hop_token != INVALID_DEFERRED_TOKEN) {
-//             qp_stop_animation(mew_hop_token);
-//             mew_hop_token = INVALID_DEFERRED_TOKEN;
-//         }
-//
-//         // Start sleep animation if not already running
-//         if (mew_sleep_token == INVALID_DEFERRED_TOKEN) {
-//             // Clear the animation area (212,0 to 236,60)
-//             qp_rect(lcd, 212, 0, 236, 60, 0, 0, 0, true);
-//             // Create and start sleep animation
-//             mew_sleep_token = qp_animate(lcd, 212, 28, mew_sleep);
-//         }
-//     }
-//     else if (wpm >= 20 && wpm <= 60) {
-//         // TWIRL state
-//         // Was in sleep, stop it
-//         if (mew_sleep_token != INVALID_DEFERRED_TOKEN) {
-//             qp_stop_animation(mew_sleep_token);
-//             mew_sleep_token = INVALID_DEFERRED_TOKEN;
-//         }
-//         // Was in hop, stop it
-//         if (mew_hop_token != INVALID_DEFERRED_TOKEN) {
-//             qp_stop_animation(mew_hop_token);
-//             mew_hop_token = INVALID_DEFERRED_TOKEN;
-//         }
-//
-//         // Start twirl animation if not already running
-//         if (mew_twirl_token == INVALID_DEFERRED_TOKEN) {
-//             // Clear the animation area
-//             qp_rect(lcd, 212, 0, 236, 60, 0, 0, 0, true);
-//
-//             mew_twirl_token = qp_animate(lcd, 212, 20, mew_twirl);
-//         }
-//     }
-//     else { // wpm > 60
-//         // HOP state
-//         // Was in sleep, stop it
-//         if (mew_sleep_token != INVALID_DEFERRED_TOKEN) {
-//             qp_stop_animation(mew_sleep_token);
-//             mew_sleep_token = INVALID_DEFERRED_TOKEN;
-//         }
-//         // Was in twirl, stop it
-//         if (mew_twirl_token != INVALID_DEFERRED_TOKEN) {
-//             qp_stop_animation(mew_twirl_token);
-//             mew_twirl_token = INVALID_DEFERRED_TOKEN;
-//         }
-//
-//         // Start hop animation if not already running
-//         if (mew_hop_token == INVALID_DEFERRED_TOKEN) {
-//             // Clear the animation area
-//             qp_rect(lcd, 212, 0, 236, 60, 0, 0, 0, true);
-//
-//             mew_hop_token = qp_animate(lcd, 212, 0, mew_hop);
-//         }
-//     }
-// }
-
 void draw_interface(uint8_t mode) {
     qp_rect(lcd,   1, 134, 229, 142, 154, 255, 235, true); // bar background
     switch (mode) {
         case 0:
             // window 2 title
-            qp_drawtext_recolor(lcd, 2, 135, font_oled, "Dark Souls 3",
+            qp_drawtext_recolor(lcd, 2, 135, font_oled, "Bloodborne",
                         0,
                         0,
                         255,
                         154, 255, 235
             );
-            qp_drawimage(lcd, 3, 144, dark_souls);
+            qp_drawimage(lcd, 1, 144, bloodborne);
             break;
         case 1:
             // window 2 title
@@ -1208,9 +1139,8 @@ void keyboard_post_init_keymap(void) {
 
         // load fonts
         font_oled = qp_load_font_mem(font_oled_font);
-        font_menu = qp_load_font_mem(font_gridlitepbsmenu);
 
-        dark_souls   = qp_load_image_mem(gfx_dark_souls);
+        bloodborne   = qp_load_image_mem(gfx_bloodborne);
 
         shift_icon   = qp_load_image_mem(gfx_shift_icon);
         control_icon = qp_load_image_mem(gfx_control_icon);
@@ -1285,6 +1215,8 @@ void housekeeping_task_user(void) {
     // Determine target backlight level based on activity time
     if (activity_time > QUANTUM_PAINTER_DISPLAY_TIMEOUT) {
         target_backlight_level = 0; // Timed out - completely off
+        // also automatically clear keylogger
+        keylogger_clear_buffer();
     } else if (activity_time > (QUANTUM_PAINTER_DISPLAY_TIMEOUT / 4)) {
         target_backlight_level = 1; // Low brightness (standby)
     } else if (activity_time > (QUANTUM_PAINTER_DISPLAY_TIMEOUT / 8)) {

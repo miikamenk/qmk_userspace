@@ -15,6 +15,5 @@ COMMUNITY_MODULES += qp_helpers
 
 src += gfx/common.qgf.c
 src += gfx/font_oled.qff.c
-src += gfx/fonts.qff.c
-src += gfx/dark_souls.qgf.c
+src += gfx/bloodborne.qgf.c
 src += keylogger.c
