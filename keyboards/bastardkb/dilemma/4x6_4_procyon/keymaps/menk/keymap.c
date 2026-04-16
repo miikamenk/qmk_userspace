@@ -18,6 +18,8 @@
  */
 #include QMK_KEYBOARD_H
 #include "transactions.h"
+#include "raw_hid.h"
+#include "g7_sync.c"
 #include <ctype.h>
 #ifdef COMMUNITY_MODULE_QP_HELPERS_ENABLE
 #    include "qp_helpers.h"
@@ -490,6 +492,16 @@ void draw_interface(uint8_t mode) {
             qp_rect(lcd,   1, 144, 238, 318, 0,   0,   0, true); // window background (black for terminal)
             //keylogger output goes here 10, 87, 239, 251
             break;
+        case 2:
+            // G7 CGM display
+            qp_drawtext_recolor(lcd, 2, 135, font_oled, "Dexcom G7",
+                        0,
+                        0,
+                        255,
+                        154, 255, 235
+            );
+            qp_rect(lcd,   1, 144, 238, 318, 0,   0,   0, true); // window background
+            break;
     }
 }
 
@@ -696,6 +708,248 @@ void draw_wpm_indicator(uint16_t x, uint16_t y, uint16_t text_width, uint16_t te
 }
 
 
+static uint16_t g7_last_glucose      = 0xFFFF;
+static uint8_t  g7_last_trend        = 0xFF;
+static uint8_t  g7_last_minutes      = 0xFF;
+static uint8_t  g7_last_status       = 0xFF;
+static uint32_t g7_last_graph_redraw = 0;
+static bool     g7_graph_dirty       = true;
+static uint8_t  g7_prev_graph[G7_GRAPH_SAMPLES] = {0};
+
+static void g7_invalidate(void) {
+    g7_last_glucose     = 0xFFFF;
+    g7_last_trend       = 0xFF;
+    g7_last_minutes     = 0xFF;
+    g7_last_status      = 0xFF;
+    g7_last_graph_redraw = 0;
+    g7_graph_dirty       = true;
+}
+
+static void draw_g7_display(void) {
+
+    g7_data_t *g7 = g7_get_data();
+
+    // Compute current minutes_ago: host offset + elapsed time
+    uint8_t minutes_now = g7->minutes_ago;
+    if (g7->valid && is_keyboard_master()) {
+        uint32_t elapsed = timer_elapsed32(g7_get_last_reading_time());
+        minutes_now = g7->minutes_ago + (uint8_t)(elapsed / 60000);
+        if (minutes_now > 99) minutes_now = 99;
+    }
+
+    // Determine range color (HSV)
+    uint8_t val_h = 85, val_s = 255, val_v = 200; // green = in range
+    if (g7->valid) {
+        if (g7->glucose_mgdl < g7->low_threshold) {
+            val_h = 0; val_s = 255; val_v = 230;   // red = low
+        } else if (g7->glucose_mgdl > 250) {
+            val_h = 0; val_s = 255; val_v = 230;   // red = very high
+        } else if (g7->glucose_mgdl > g7->high_threshold) {
+            val_h = 43; val_s = 255; val_v = 230;  // yellow = high
+        }
+    }
+
+    bool glucose_changed = (g7_last_glucose != g7->glucose_mgdl) || (g7_last_trend != g7->trend);
+    bool time_changed    = (g7_last_minutes != minutes_now) || (g7_last_status != g7->status);
+
+    // Row 1: glucose value + trend
+    if (glucose_changed) {
+        g7_last_glucose = g7->glucose_mgdl;
+        g7_last_trend   = g7->trend;
+
+        uint16_t y = 150;
+        // Clear line
+        qp_rect(lcd, 4, y, 236, y + font_oled->line_height + 2, 0, 0, 0, true);
+
+        if (!g7->valid) {
+            qp_drawtext_recolor(lcd, 8, y, font_oled, "Waiting for data...",
+                                0, 0, 128, 0, 0, 0);
+        } else {
+            char buf[32];
+            if (g7->unit == G7_UNIT_MMOL) {
+                uint16_t mmol_x10 = g7_mgdl_to_mmol_x10(g7->glucose_mgdl);
+                snprintf(buf, sizeof(buf), "%u.%u mmol/L  %s",
+                         mmol_x10 / 10, mmol_x10 % 10, g7_trend_str(g7->trend));
+            } else {
+                snprintf(buf, sizeof(buf), "%u mg/dL  %s",
+                         g7->glucose_mgdl, g7_trend_str(g7->trend));
+            }
+            qp_drawtext_recolor(lcd, 8, y, font_oled, buf,
+                                val_h, val_s, val_v, 0, 0, 0);
+        }
+    }
+
+    // Row 2: time + range status
+    if (time_changed || glucose_changed) {
+        g7_last_minutes = minutes_now;
+        g7_last_status  = g7->status;
+
+        uint16_t y = 150 + font_oled->line_height + 6;
+        qp_rect(lcd, 4, y, 236, y + font_oled->line_height + 2, 0, 0, 0, true);
+
+        if (g7->valid) {
+            char buf[32];
+            const char *range_str;
+            if (g7->glucose_mgdl < g7->low_threshold)       range_str = "LOW";
+            else if (g7->glucose_mgdl > 250)                 range_str = "VERY HIGH";
+            else if (g7->glucose_mgdl > g7->high_threshold)  range_str = "HIGH";
+            else                                              range_str = "In Range";
+
+            snprintf(buf, sizeof(buf), "%u min ago    %s", minutes_now, range_str);
+            qp_drawtext_recolor(lcd, 8, y, font_oled, buf,
+                                val_h, val_s, val_v, 0, 0, 0);
+        }
+    }
+
+    // Graph area
+#ifdef COMMUNITY_MODULE_QP_HELPERS_ENABLE
+    // Check if graph data actually changed
+    {
+        uint8_t *src = g7_get_graph();
+        if (memcmp(g7_prev_graph, src, G7_GRAPH_SAMPLES) != 0) {
+            memcpy(g7_prev_graph, src, G7_GRAPH_SAMPLES);
+            g7_graph_dirty = true;
+        }
+    }
+
+    if (g7->valid && g7_graph_dirty) {
+        g7_graph_dirty       = false;
+        g7_last_graph_redraw = timer_read32();
+
+        uint16_t label_h  = font_oled->line_height;
+        uint16_t graph_x  = 34;
+        uint16_t graph_w  = 232 - graph_x;
+        uint16_t graph_y  = 150 + (font_oled->line_height + 6) * 2 + 4;
+        uint16_t graph_h  = 290 - graph_y - label_h - 2;
+
+        // Reverse graph so oldest is on the left, newest on the right
+        uint8_t *src = g7_get_graph();
+        uint8_t  reversed[G7_GRAPH_SAMPLES];
+        for (uint8_t i = 0; i < G7_GRAPH_SAMPLES; i++) {
+            reversed[i] = src[G7_GRAPH_SAMPLES - 1 - i];
+        }
+
+        // Clear entire graph + label area
+        qp_rect(lcd, 1, graph_y - 2, 236, 290, 0, 0, 0, true);
+
+        // Draw axes
+        qp_line(lcd, graph_x, graph_y, graph_x, graph_y + graph_h - 1, 0, 0, 80);
+        qp_line(lcd, graph_x, graph_y + graph_h - 1, graph_x + graph_w, graph_y + graph_h - 1, 0, 0, 80);
+
+        // Y-axis glucose labels
+        const uint8_t max_val = 200; // 400 mg/dL / 2
+        {
+            char lbl[8];
+            // Draw labels at 0, 100, 200, 300, 400 mg/dL (or mmol equivalents)
+            const uint16_t y_vals_mgdl[] = {0, 100, 200, 300, 400};
+            for (uint8_t i = 0; i < 5; i++) {
+                uint16_t mgdl = y_vals_mgdl[i];
+                uint8_t  scaled = mgdl > 400 ? 200 : mgdl / 2;
+                uint16_t py = graph_y + graph_h - 1 - (uint16_t)((uint32_t)scaled * (graph_h - 1) / max_val);
+
+                if (g7->unit == G7_UNIT_MMOL) {
+                    uint16_t mmol = g7_mgdl_to_mmol_x10(mgdl);
+                    snprintf(lbl, sizeof(lbl), "%u.%u", mmol / 10, mmol % 10);
+                } else {
+                    snprintf(lbl, sizeof(lbl), "%u", mgdl);
+                }
+                qp_drawtext_recolor(lcd, 4, py - label_h / 2, font_oled, lbl,
+                                    0, 0, 120, 0, 0, 0);
+                // Small tick mark
+                qp_line(lcd, graph_x - 2, py, graph_x, py, 0, 0, 80);
+            }
+        }
+
+        // X-axis time labels (24 samples * 5 min = 2h history)
+        {
+            uint16_t x_label_y = graph_y + graph_h + 2;
+            const uint8_t step_px = graph_w / G7_GRAPH_SAMPLES;
+
+            // Labels at oldest (left), middle, and newest (right)
+            // -2h at index 0, -1h at index 12, Now at index 23
+            const char *time_labels[] = {"-2h", "-1h", "Now"};
+            const uint8_t time_idx[]  = {0, 12, 23};
+            for (uint8_t i = 0; i < 3; i++) {
+                uint16_t tx = graph_x + step_px * time_idx[i];
+                // Center the label roughly
+                uint16_t tw = qp_textwidth(font_oled, time_labels[i]);
+                int16_t  lx = tx - tw / 2;
+                if (lx < 0) lx = 0;
+                if (lx + tw > 236) lx = 236 - tw;
+                qp_drawtext_recolor(lcd, lx, x_label_y, font_oled, time_labels[i],
+                                    0, 0, 120, 0, 0, 0);
+                // Small tick mark
+                qp_line(lcd, tx, graph_y + graph_h - 1, tx, graph_y + graph_h + 1, 0, 0, 80);
+            }
+        }
+
+        // Draw graph with per-segment colors based on glucose thresholds
+        {
+            const uint8_t step       = graph_w / G7_GRAPH_SAMPLES;
+            const uint8_t remainder  = graph_w - (G7_GRAPH_SAMPLES * step);
+            uint8_t       seg_offset = 0;
+
+            for (uint8_t n = 0; n < G7_GRAPH_SAMPLES - 1; ++n) {
+                seg_offset += (remainder != 0 && n % (G7_GRAPH_SAMPLES / remainder) == 0) ? 1 : 0;
+
+                uint16_t x1 = graph_x + (step * n) + seg_offset;
+                uint16_t y1 = graph_y + graph_h - 1 - (uint16_t)((uint32_t)MIN(reversed[n], max_val) * (graph_h - 1) / max_val);
+                uint16_t x2 = graph_x + (step * (n + 1)) + seg_offset;
+                uint16_t y2 = graph_y + graph_h - 1 - (uint16_t)((uint32_t)MIN(reversed[n + 1], max_val) * (graph_h - 1) / max_val);
+
+                uint16_t seg_mgdl = (uint16_t)reversed[n] * 2;
+                uint8_t seg_h = 85, seg_s = 255, seg_v = 200;
+                if (seg_mgdl < g7->low_threshold) {
+                    seg_h = 0; seg_s = 255; seg_v = 230;
+                } else if (seg_mgdl > 250) {
+                    seg_h = 0; seg_s = 255; seg_v = 230;
+                } else if (seg_mgdl > g7->high_threshold) {
+                    seg_h = 43; seg_s = 255; seg_v = 230;
+                }
+
+                qp_line(lcd, x1, y1, x2, y2, seg_h, seg_s, seg_v);
+            }
+        }
+
+        // Draw threshold lines on graph
+        uint8_t low_y_val  = g7->low_threshold > 510  ? 255 : g7->low_threshold / 2;
+        uint8_t high_y_val = g7->high_threshold > 510 ? 255 : g7->high_threshold / 2;
+        uint16_t low_px  = graph_y + graph_h - 1 - (uint16_t)((uint32_t)low_y_val * (graph_h - 1) / max_val);
+        uint16_t high_px = graph_y + graph_h - 1 - (uint16_t)((uint32_t)high_y_val * (graph_h - 1) / max_val);
+
+        // Dashed low line (red)
+        for (uint16_t x = graph_x; x < graph_x + graph_w; x += 6) {
+            qp_line(lcd, x, low_px, x + 3 < graph_x + graph_w ? x + 3 : graph_x + graph_w, low_px, 0, 255, 150);
+        }
+        // Dashed high line (yellow)
+        for (uint16_t x = graph_x; x < graph_x + graph_w; x += 6) {
+            qp_line(lcd, x, high_px, x + 3 < graph_x + graph_w ? x + 3 : graph_x + graph_w, high_px, 43, 255, 150);
+        }
+    }
+#endif
+
+    // Bottom row: thresholds
+    {
+        static bool thresholds_drawn = false;
+        if (!thresholds_drawn && g7->valid) {
+            thresholds_drawn = true;
+            uint16_t y = 296;
+            char buf[40];
+            if (g7->unit == G7_UNIT_MMOL) {
+                uint16_t lo = g7_mgdl_to_mmol_x10(g7->low_threshold);
+                uint16_t hi = g7_mgdl_to_mmol_x10(g7->high_threshold);
+                snprintf(buf, sizeof(buf), "Lo:%u.%u  Hi:%u.%u mmol/L",
+                         lo / 10, lo % 10, hi / 10, hi % 10);
+            } else {
+                snprintf(buf, sizeof(buf), "Lo:%u  Hi:%u mg/dL",
+                         g7->low_threshold, g7->high_threshold);
+            }
+            qp_drawtext_recolor(lcd, 8, y, font_oled, buf,
+                                0, 0, 128, 0, 0, 0);
+        }
+    }
+}
+
 void ili9341_draw_user(void) {
     static layer_state_t last_layer = 0xFF;
     static bool          first_draw = true;
@@ -768,12 +1022,17 @@ void ili9341_draw_user(void) {
             // Re-initialize terminal when switching to terminal mode
             terminal_initialized = false;
             init_terminal_display();
+        } else if (mode == 2) {
+            // Force full redraw of G7 display when switching to it
+            g7_invalidate();
         }
     }
 
-    // Always try to draw terminal (it will self-throttle)
+    // Always try to draw terminal/g7 (they self-throttle)
     if (mode == 1) {
         draw_terminal();
+    } else if (mode == 2) {
+        draw_g7_display();
     }
 
     // Throttle other UI updates to reduce flashing
@@ -1117,6 +1376,15 @@ void ili9341_draw_user(void) {
 }
 
 
+// VIA custom value command hook - receives G7 data from host
+// Host sends: [id_custom_set_value(0x07), G7_VIA_CHANNEL(0xA0), sub_cmd, payload...]
+void via_custom_value_command_kb(uint8_t *data, uint8_t length) {
+    // data[0] = command_id, data[1] = channel_id, data[2..] = channel data
+    if (length >= 3 && data[1] == G7_VIA_CHANNEL) {
+        g7_process_hid(&data[2], length - 2);
+    }
+}
+
 void keyboard_post_init_keymap(void) {
 #ifdef QUANTUM_PAINTER_ENABLE
     if (is_keyboard_left()) {
@@ -1155,7 +1423,9 @@ void keyboard_post_init_user(void) {
     transaction_register_rpc(USER_SYNC_CAPS_WORD, user_sync_caps_word_recv);
     transaction_register_rpc(USER_SYNC_MODE, user_sync_mode_recv);
     transaction_register_rpc(USER_SYNC_KEYLOGGER, user_sync_keylogger_recv);
+    transaction_register_rpc(USER_SYNC_G7, g7_sync_recv);
 
+    g7_init();
     keylogger_init();
 
     keyboard_post_init_keymap();
@@ -1170,7 +1440,7 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     switch (keycode) {
         case QK_USER_15:
             if (record->event.pressed) {
-                display_mode = (display_mode + 1) % 2;  // Toggle between 0 and 1
+                display_mode = (display_mode + 1) % 3;  // Cycle: 0 (info) -> 1 (terminal) -> 2 (G7)
                 return false;
             }
             break;
@@ -1299,6 +1569,23 @@ void housekeeping_task_user(void) {
             }
 
             transaction_rpc_send(USER_SYNC_MODE, sizeof(mode), &mode);
+        }
+
+        // G7 SYNC - send glucose data to slave for display
+        {
+            static uint32_t last_g7_sync = 0;
+            static uint16_t last_g7_glucose = 0xFFFF;
+            g7_data_t *g7 = g7_get_data();
+
+            if (g7->valid && (timer_elapsed32(last_g7_sync) > 1000 || last_g7_glucose != g7->glucose_mgdl)) {
+                last_g7_sync    = timer_read32();
+                last_g7_glucose = g7->glucose_mgdl;
+
+                g7_sync_t sync_data;
+                memcpy(&sync_data.data, g7, sizeof(g7_data_t));
+                memcpy(sync_data.graph, g7_get_graph(), G7_GRAPH_SAMPLES);
+                transaction_rpc_send(USER_SYNC_G7, sizeof(sync_data), &sync_data);
+            }
         }
 
         // BUFFERED KEYLOGGER SYNC - Throttled to prevent lag

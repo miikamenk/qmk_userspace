@@ -17,3 +17,4 @@ src += gfx/common.qgf.c
 src += gfx/font_oled.qff.c
 src += gfx/bloodborne.qgf.c
 src += keylogger.c
+src += g7_sync.c
