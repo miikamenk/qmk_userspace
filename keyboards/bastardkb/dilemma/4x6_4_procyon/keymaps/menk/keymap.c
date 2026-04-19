@@ -217,6 +217,7 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 #    include "gfx/common.qgf.c"
 #    include "gfx/bloodborne.qgf.c"
 #    include "gfx/font_oled.qff.c"
+#    include "gfx/sans28.qff.c"
 
 
 typedef struct {
@@ -228,6 +229,7 @@ static dual_hsv_t user_hsv;
 
 painter_device_t lcd;
 painter_font_handle_t         font_oled;
+painter_font_handle_t         font_big;
 painter_font_handle_t         font_menu;
 static painter_image_handle_t shift_icon, control_icon, alt_icon,  windows_icon;
 static painter_image_handle_t bloodborne;
@@ -714,15 +716,118 @@ static uint8_t  g7_last_minutes      = 0xFF;
 static uint8_t  g7_last_status       = 0xFF;
 static uint32_t g7_last_graph_redraw = 0;
 static bool     g7_graph_dirty       = true;
+static bool     g7_thresholds_drawn  = false;
 static uint8_t  g7_prev_graph[G7_GRAPH_SAMPLES] = {0};
 
 static void g7_invalidate(void) {
-    g7_last_glucose     = 0xFFFF;
-    g7_last_trend       = 0xFF;
-    g7_last_minutes     = 0xFF;
-    g7_last_status      = 0xFF;
+    g7_last_glucose      = 0xFFFF;
+    g7_last_trend        = 0xFF;
+    g7_last_minutes      = 0xFF;
+    g7_last_status       = 0xFF;
     g7_last_graph_redraw = 0;
     g7_graph_dirty       = true;
+    g7_thresholds_drawn  = false;
+}
+
+// ============================================================
+// G7 trend helpers: outline ring + colored triangle on perimeter
+// ============================================================
+
+// Scanline-rasterized filled triangle.
+static void g7_fill_triangle(int16_t x0, int16_t y0,
+                             int16_t x1, int16_t y1,
+                             int16_t x2, int16_t y2,
+                             uint8_t h, uint8_t s, uint8_t v) {
+    // Sort vertices ascending by y.
+    if (y0 > y1) { int16_t tx=x0,ty=y0; x0=x1; y0=y1; x1=tx; y1=ty; }
+    if (y1 > y2) { int16_t tx=x1,ty=y1; x1=x2; y1=y2; x2=tx; y2=ty; }
+    if (y0 > y1) { int16_t tx=x0,ty=y0; x0=x1; y0=y1; x1=tx; y1=ty; }
+
+    for (int16_t y = y0; y <= y2; y++) {
+        int16_t xa, xb;
+        // Long edge (y0 → y2) covers full height.
+        if (y2 == y0) xa = x0;
+        else          xa = x0 + (int16_t)((int32_t)(x2 - x0) * (y - y0) / (y2 - y0));
+        // Short edges: y0→y1 for upper half, y1→y2 for lower half.
+        if (y < y1) {
+            if (y1 == y0) xb = x0;
+            else          xb = x0 + (int16_t)((int32_t)(x1 - x0) * (y - y0) / (y1 - y0));
+        } else {
+            if (y2 == y1) xb = x1;
+            else          xb = x1 + (int16_t)((int32_t)(x2 - x1) * (y - y1) / (y2 - y1));
+        }
+        if (xa > xb) { int16_t t = xa; xa = xb; xb = t; }
+        qp_line(lcd, (uint16_t)xa, (uint16_t)y, (uint16_t)xb, (uint16_t)y, h, s, v);
+    }
+}
+
+// Outline circle (2 px) around the glucose reading plus a small filled
+// triangle sitting on the perimeter, pointing in the trend direction.
+// Ring color reflects glucose range; triangle is black with a 2 px white border.
+static void g7_draw_trend_ring(uint16_t cx, uint16_t cy, int16_t r, uint8_t trend,
+                               uint8_t ring_h, uint8_t ring_s, uint8_t ring_v) {
+    // Unit direction vector (per-mille) per trend.
+    int16_t dx1000 = 0, dy1000 = 0;
+    switch (trend) {
+        case G7_TREND_DOUBLE_UP:
+        case G7_TREND_SINGLE_UP:     dx1000 =    0; dy1000 = -1000; break;
+        case G7_TREND_FORTY_FIVE_UP: dx1000 =  707; dy1000 =  -707; break;
+        case G7_TREND_FLAT:          dx1000 = 1000; dy1000 =     0; break;
+        case G7_TREND_FORTY_FIVE_DN: dx1000 =  707; dy1000 =   707; break;
+        case G7_TREND_SINGLE_DN:
+        case G7_TREND_DOUBLE_DN:     dx1000 =    0; dy1000 =  1000; break;
+        default: return;
+    }
+
+    // Base half-angle ~30°: cos ≈ 0.866, sin ≈ 0.500 (per-mille).
+    const int32_t C = 866, S = 500;
+
+    // Two base points on the circle at angle θ ± 30°.
+    int32_t b1x = ((int32_t)dx1000 * C - (int32_t)dy1000 * S) / 1000;
+    int32_t b1y = ((int32_t)dy1000 * C + (int32_t)dx1000 * S) / 1000;
+    int32_t b2x = ((int32_t)dx1000 * C + (int32_t)dy1000 * S) / 1000;
+    int32_t b2y = ((int32_t)dy1000 * C - (int32_t)dx1000 * S) / 1000;
+
+    int16_t p1x = (int16_t)cx + (int16_t)((b1x * r) / 1000);
+    int16_t p1y = (int16_t)cy + (int16_t)((b1y * r) / 1000);
+    int16_t p2x = (int16_t)cx + (int16_t)((b2x * r) / 1000);
+    int16_t p2y = (int16_t)cy + (int16_t)((b2y * r) / 1000);
+
+    // Tip extends L px beyond the outline along θ. Must match tri_ext in caller.
+    const int16_t L = 10;
+    int16_t tx = (int16_t)cx + (int16_t)(((int32_t)dx1000 * (r + L)) / 1000);
+    int16_t ty = (int16_t)cy + (int16_t)(((int32_t)dy1000 * (r + L)) / 1000);
+
+    // Offset each vertex 2 px outward from the triangle centroid to build a
+    // larger white triangle; the black inner fill then leaves a 2 px border.
+    int16_t tcx = (p1x + p2x + tx) / 3;
+    int16_t tcy = (p1y + p2y + ty) / 3;
+    const int16_t BORDER = 2;
+
+    #define OFFSET_OUT(px, py, ox, oy) do {                                \
+        int32_t _dx = (px) - tcx;                                          \
+        int32_t _dy = (py) - tcy;                                          \
+        int32_t _ax = _dx < 0 ? -_dx : _dx;                                \
+        int32_t _ay = _dy < 0 ? -_dy : _dy;                                \
+        int32_t _len = _ax > _ay ? _ax + (_ay >> 1) : _ay + (_ax >> 1);    \
+        if (_len == 0) { (ox) = (px); (oy) = (py); }                       \
+        else {                                                             \
+            (ox) = (px) + (int16_t)((_dx * BORDER) / _len);                \
+            (oy) = (py) + (int16_t)((_dy * BORDER) / _len);                \
+        }                                                                  \
+    } while (0)
+
+    int16_t op1x, op1y, op2x, op2y, otx, oty;
+    OFFSET_OUT(p1x, p1y, op1x, op1y);
+    OFFSET_OUT(p2x, p2y, op2x, op2y);
+    OFFSET_OUT(tx,  ty,  otx,  oty);
+    #undef OFFSET_OUT
+
+    g7_fill_triangle(op1x, op1y, op2x, op2y, otx, oty, 0, 0, 255); // white border
+    g7_fill_triangle(p1x,  p1y,  p2x,  p2y,  tx,  ty,  0, 0,   0); // black fill
+    qp_circle(lcd, cx, cy, r,     255,        0,     255, false);
+    qp_circle(lcd, cx, cy, r - 1, 255,        0,     255, false);
+    qp_circle(lcd, cx, cy, r - 2, ring_h, ring_s, ring_v, true);
 }
 
 static void draw_g7_display(void) {
@@ -752,51 +857,75 @@ static void draw_g7_display(void) {
     bool glucose_changed = (g7_last_glucose != g7->glucose_mgdl) || (g7_last_trend != g7->trend);
     bool time_changed    = (g7_last_minutes != minutes_now) || (g7_last_status != g7->status);
 
-    // Row 1: glucose value + trend
+    uint16_t lh = font_oled->line_height;
+
+    // Glucose value: centered big number inside an outline ring, with a
+    // trend-colored triangle on the ring's perimeter.
+    // Drawn before the top row so the top row's redraw wins on any overlap.
     if (glucose_changed) {
         g7_last_glucose = g7->glucose_mgdl;
         g7_last_trend   = g7->trend;
 
-        uint16_t y = 150;
-        // Clear line
-        qp_rect(lcd, 4, y, 236, y + font_oled->line_height + 2, 0, 0, 0, true);
+        const uint16_t cx = 116;
+        const uint16_t cy = 190;
+        const int16_t  r  = 34;
+        const int16_t  tri_ext = 10;  // must match L inside g7_draw_trend_ring
 
-        if (!g7->valid) {
-            qp_drawtext_recolor(lcd, 8, y, font_oled, "Waiting for data...",
-                                0, 0, 128, 0, 0, 0);
-        } else {
-            char buf[32];
+        // Clear the middle zone (covers ring + triangle protrusion).
+        qp_rect(lcd, 1, cy - r - tri_ext - 1, 238, cy + r + tri_ext + 1,
+                0, 0, 0, true);
+
+        if (g7->valid) {
+            char num[8];
             if (g7->unit == G7_UNIT_MMOL) {
                 uint16_t mmol_x10 = g7_mgdl_to_mmol_x10(g7->glucose_mgdl);
-                snprintf(buf, sizeof(buf), "%u.%u mmol/L  %s",
-                         mmol_x10 / 10, mmol_x10 % 10, g7_trend_str(g7->trend));
+                snprintf(num, sizeof(num), "%u.%u", mmol_x10 / 10, mmol_x10 % 10);
             } else {
-                snprintf(buf, sizeof(buf), "%u mg/dL  %s",
-                         g7->glucose_mgdl, g7_trend_str(g7->trend));
+                snprintf(num, sizeof(num), "%u", g7->glucose_mgdl);
             }
-            qp_drawtext_recolor(lcd, 8, y, font_oled, buf,
-                                val_h, val_s, val_v, 0, 0, 0);
+
+            int16_t tw = qp_textwidth(font_big, num);
+            int16_t th = font_big->line_height;
+            g7_draw_trend_ring(cx, cy, r, g7->trend, val_h, val_s, val_v);
+            qp_drawtext_recolor(lcd,
+                (uint16_t)((int16_t)cx - tw / 2),
+                (uint16_t)((int16_t)cy - th / 2),
+                font_big, num,
+                0, 0, 0, val_h, val_s, val_v);
         }
     }
 
-    // Row 2: time + range status
+    // Top row: "X min ago" (left) and range status (right).
+    // Clears only the side text regions so the glucose triangle's UP tip,
+    // which protrudes into y=146..160, survives.
     if (time_changed || glucose_changed) {
         g7_last_minutes = minutes_now;
         g7_last_status  = g7->status;
 
-        uint16_t y = 150 + font_oled->line_height + 6;
-        qp_rect(lcd, 4, y, 236, y + font_oled->line_height + 2, 0, 0, 0, true);
+        uint16_t y = 146;
+        if (!g7->valid) {
+            qp_rect(lcd, 4, y, 236, y + lh + 2, 0, 0, 0, true);
+            qp_drawtext_recolor(lcd, 8, y, font_oled, "Waiting for data...",
+                                0, 0, 128, 0, 0, 0);
+        } else {
+            // Left: "X min ago" — clear up to x=80, leave center column alone.
+            qp_rect(lcd, 4, y, 80, y + lh + 2, 0, 0, 0, true);
+            char ago_buf[16];
+            snprintf(ago_buf, sizeof(ago_buf), "%u min ago", minutes_now);
+            qp_drawtext_recolor(lcd, 8, y, font_oled, ago_buf,
+                                0, 0, 200, 0, 0, 0);
 
-        if (g7->valid) {
-            char buf[32];
+            // Right: range status — clear from x=160 only.
+            qp_rect(lcd, 160, y, 236, y + lh + 2, 0, 0, 0, true);
             const char *range_str;
             if (g7->glucose_mgdl < g7->low_threshold)       range_str = "LOW";
             else if (g7->glucose_mgdl > 250)                 range_str = "VERY HIGH";
             else if (g7->glucose_mgdl > g7->high_threshold)  range_str = "HIGH";
-            else                                              range_str = "In Range";
-
-            snprintf(buf, sizeof(buf), "%u min ago    %s", minutes_now, range_str);
-            qp_drawtext_recolor(lcd, 8, y, font_oled, buf,
+            else                                              range_str = "IN RANGE";
+            uint16_t rw = qp_textwidth(font_oled, range_str);
+            int16_t  rx = 236 - (int16_t)rw - 4;
+            if (rx < 161) rx = 161;
+            qp_drawtext_recolor(lcd, rx, y, font_oled, range_str,
                                 val_h, val_s, val_v, 0, 0, 0);
         }
     }
@@ -816,11 +945,11 @@ static void draw_g7_display(void) {
         g7_graph_dirty       = false;
         g7_last_graph_redraw = timer_read32();
 
-        uint16_t label_h  = font_oled->line_height;
+        uint16_t label_h  = lh;
         uint16_t graph_x  = 34;
         uint16_t graph_w  = 232 - graph_x;
-        uint16_t graph_y  = 150 + (font_oled->line_height + 6) * 2 + 4;
-        uint16_t graph_h  = 290 - graph_y - label_h - 2;
+        uint16_t graph_y  = 229;
+        uint16_t graph_h  = 72;
 
         // Reverse graph so oldest is on the left, newest on the right
         uint8_t *src = g7_get_graph();
@@ -830,7 +959,7 @@ static void draw_g7_display(void) {
         }
 
         // Clear entire graph + label area
-        qp_rect(lcd, 1, graph_y - 2, 236, 290, 0, 0, 0, true);
+        qp_rect(lcd, 1, graph_y - 2, 236, graph_y + graph_h + label_h + 2, 0, 0, 0, true);
 
         // Draw axes
         qp_line(lcd, graph_x, graph_y, graph_x, graph_y + graph_h - 1, 0, 0, 80);
@@ -929,24 +1058,22 @@ static void draw_g7_display(void) {
 #endif
 
     // Bottom row: thresholds
-    {
-        static bool thresholds_drawn = false;
-        if (!thresholds_drawn && g7->valid) {
-            thresholds_drawn = true;
-            uint16_t y = 296;
-            char buf[40];
-            if (g7->unit == G7_UNIT_MMOL) {
-                uint16_t lo = g7_mgdl_to_mmol_x10(g7->low_threshold);
-                uint16_t hi = g7_mgdl_to_mmol_x10(g7->high_threshold);
-                snprintf(buf, sizeof(buf), "Lo:%u.%u  Hi:%u.%u mmol/L",
-                         lo / 10, lo % 10, hi / 10, hi % 10);
-            } else {
-                snprintf(buf, sizeof(buf), "Lo:%u  Hi:%u mg/dL",
-                         g7->low_threshold, g7->high_threshold);
-            }
-            qp_drawtext_recolor(lcd, 8, y, font_oled, buf,
-                                0, 0, 128, 0, 0, 0);
+    if (!g7_thresholds_drawn && g7->valid) {
+        g7_thresholds_drawn = true;
+        uint16_t y = 312;
+        qp_rect(lcd, 4, y, 236, y + lh + 2, 0, 0, 0, true);
+        char buf[40];
+        if (g7->unit == G7_UNIT_MMOL) {
+            uint16_t lo = g7_mgdl_to_mmol_x10(g7->low_threshold);
+            uint16_t hi = g7_mgdl_to_mmol_x10(g7->high_threshold);
+            snprintf(buf, sizeof(buf), "Lo:%u.%u  Hi:%u.%u mmol/L",
+                     lo / 10, lo % 10, hi / 10, hi % 10);
+        } else {
+            snprintf(buf, sizeof(buf), "Lo:%u  Hi:%u mg/dL",
+                     g7->low_threshold, g7->high_threshold);
         }
+        qp_drawtext_recolor(lcd, 8, y, font_oled, buf,
+                            0, 0, 127, 0, 0, 0);
     }
 }
 
@@ -1407,6 +1534,7 @@ void keyboard_post_init_keymap(void) {
 
         // load fonts
         font_oled = qp_load_font_mem(font_oled_font);
+        font_big  = qp_load_font_mem(font_sans28);
 
         bloodborne   = qp_load_image_mem(gfx_bloodborne);
 
