@@ -7,6 +7,8 @@
 #include "glcdfont.c"
 #include "custom_keycodes.h"
 #include "moominhouse.h"
+#include "transactions.h"
+#include <string.h>
 
 uint8_t  pre_layer, cur_layer;
 bool     interrupted;
@@ -354,10 +356,42 @@ bool oled_task_user(void) {
     return true;
 }
 
+static void kw_config_sync_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
+    if (in_buflen == sizeof(kw_config_t)) {
+        memcpy(&kw_config, in_data, in_buflen);
+    }
+}
+
+void kw_config_sync_init(void) {
+    transaction_register_rpc(OLEDFORCE_SYNC, kw_config_sync_handler);
+}
+
+void kw_config_sync_task(void) {
+    if (!is_keyboard_master()) return;
+
+    static uint32_t    last_sync = 0;
+    static kw_config_t last_sent = {0};
+    bool               needs_sync = false;
+
+    if (memcmp(&kw_config, &last_sent, sizeof(kw_config_t)) != 0) {
+        needs_sync = true;
+    } else if (timer_elapsed32(last_sync) > 250) {
+        needs_sync = true;
+    }
+
+    if (needs_sync) {
+        if (transaction_rpc_send(OLEDFORCE_SYNC, sizeof(kw_config_t), &kw_config)) {
+            last_sync = timer_read32();
+            memcpy(&last_sent, &kw_config, sizeof(kw_config_t));
+        }
+    }
+}
+
 void housekeeping_task_kb(void) {
     if (is_oled_on() && last_input_activity_elapsed() > OLED_TIMEOUT) {
         oled_off();
     }
+    kw_config_sync_task();
 }
 
 void oled_interrupt(uint16_t keycode) {

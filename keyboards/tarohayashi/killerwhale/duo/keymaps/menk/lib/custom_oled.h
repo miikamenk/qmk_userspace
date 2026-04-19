@@ -8,3 +8,5 @@ void oled_init_addedoled(void);
 bool oled_task_addedoled(void);
 void oled_interrupt(uint16_t keycode);
 void oled_tempch(bool on, uint16_t keycode);
+void kw_config_sync_init(void);
+void kw_config_sync_task(void);
