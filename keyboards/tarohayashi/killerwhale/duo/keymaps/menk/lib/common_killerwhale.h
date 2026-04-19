@@ -14,6 +14,7 @@ enum {
     STATE_INFO    = 2,
     STATE_ANIMONE = 3,
     STATE_ANIMTWO = 4,
+    STATE_G7      = 5,
 };
 
 // 保存される設定の定義

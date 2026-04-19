@@ -4,6 +4,7 @@
 #include "quantum.h"
 #include "lib/common_killerwhale.h"
 #include "lib/custom_oled.h"
+#include "lib/g7_sync.h"
 
 // レイヤーごとの発光場所、発光色の設定
 const rgblight_segment_t PROGMEM base_layer[] = RGBLIGHT_LAYER_SEGMENTS( { 0, 0, HSV_YELLOW} );
@@ -35,6 +36,8 @@ const rgblight_segment_t* const PROGMEM my_rgb_layers[] = RGBLIGHT_LAYERS_LIST(
 void keyboard_post_init_kb(void) {
     rgblight_layers = my_rgb_layers;
     kw_config_sync_init();
+    g7_init();
+    keyboard_post_init_user();
 }
 
 // 発光条件の設定

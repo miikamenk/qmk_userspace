@@ -69,7 +69,7 @@ static void handle_joy_axis(keyrecord_t *record, uint8_t axis, int16_t value) {
 
 // Cycle a 0..4 counter. Macro because oled_state fields are bitfields
 // (can't take their address).
-#define CYCLE_OLED_STATE(field) do { if (++(field) > 4) (field) = 0; } while (0)
+#define CYCLE_OLED_STATE(field) do { if (++(field) > 5) (field) = 0; } while (0)
 
 // ---- Main keycode dispatch ----
 

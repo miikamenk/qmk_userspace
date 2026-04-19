@@ -10,4 +10,5 @@ SRC += lib/custom_keycodes.c
 SRC += lib/add_rgblayers.c
 SRC += lib/custom_oled.c
 SRC += lib/moominhouse.c
+SRC += lib/g7_sync.c
 

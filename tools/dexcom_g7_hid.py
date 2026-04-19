@@ -2,8 +2,9 @@
 """
 Dexcom G7 -> QMK Raw HID bridge
 
-Polls Dexcom Share for glucose readings via pydexcom and sends them
-to the keyboard over HID using VIA's custom value channel.
+Polls Dexcom Share for glucose readings via pydexcom and broadcasts them
+to every connected VIA-compatible keyboard (e.g. the dilemma 4x6_4_procyon
+and the killerwhale duo).
 
 Requirements:
     pip install hidapi pydexcom
@@ -58,33 +59,33 @@ TREND_MAP = {
 HID_REPORT_SIZE = 32
 
 
-RECONNECT_POLL_INTERVAL = 5  # seconds between reconnect attempts
+RESCAN_INTERVAL = 5  # seconds between scans for newly plugged-in keyboards
 
 
-def find_keyboard():
-    for dev in hid.enumerate():
-        if dev["usage_page"] == VIA_USAGE_PAGE and dev["usage"] == VIA_USAGE_ID:
-            print(f"Found: {dev['manufacturer_string']} {dev['product_string']}")
-            return dev["path"]
-    return None
+def enumerate_keyboards():
+    """Return a list of all VIA-compatible keyboards currently enumerated."""
+    return [
+        dev for dev in hid.enumerate()
+        if dev["usage_page"] == VIA_USAGE_PAGE and dev["usage"] == VIA_USAGE_ID
+    ]
 
 
-def open_keyboard():
-    """Find and open the keyboard HID device, blocking until found.
-    Returns (device, path) tuple."""
-    while True:
-        kb_path = find_keyboard()
-        if kb_path:
-            try:
-                device = hid.device()
-                device.open_path(kb_path)
-                device.set_nonblocking(True)
-                return device, kb_path
-            except OSError as e:
-                print(f"Failed to open device: {e}")
-        else:
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] Keyboard not found, waiting...")
-        time.sleep(RECONNECT_POLL_INTERVAL)
+def describe(dev_info):
+    mfr = dev_info.get("manufacturer_string") or "?"
+    prod = dev_info.get("product_string") or "?"
+    return f"{mfr} {prod}"
+
+
+def open_device(dev_info):
+    """Open an HID device. Returns the device handle or None on failure."""
+    try:
+        device = hid.device()
+        device.open_path(dev_info["path"])
+        device.set_nonblocking(True)
+        return device
+    except OSError as e:
+        print(f"  failed to open {describe(dev_info)}: {e}")
+        return None
 
 
 def hid_write(device, data):
@@ -94,30 +95,6 @@ def hid_write(device, data):
         return True
     except OSError:
         return False
-
-
-def keyboard_still_present(path):
-    """Check if the keyboard with the given path is still enumerated."""
-    for dev in hid.enumerate():
-        if dev["path"] == path:
-            return True
-    return False
-
-
-def wait_with_monitor(device, path, seconds):
-    """Sleep for `seconds` while checking the keyboard is still connected.
-    Returns False if the keyboard disappeared."""
-    end = time.monotonic() + seconds
-    while time.monotonic() < end:
-        if not keyboard_still_present(path):
-            return False
-        # Also try a read — catches cases where path lingers briefly
-        try:
-            device.read(64)
-        except OSError:
-            return False
-        time.sleep(1)
-    return True
 
 
 def build_reading_packet(mgdl, trend, minutes_ago):
@@ -159,9 +136,7 @@ def build_history_packet(start_idx, values):
 def send_history(device, readings):
     """Send historical readings as graph data (newest first).
     Returns False if the device disconnected during send."""
-    graph_values = []
-    for r in readings:
-        graph_values.append(min(r["mgdl"] // 2, 255))
+    graph_values = [min(r["mgdl"] // 2, 255) for r in readings]
 
     chunk_size = HID_REPORT_SIZE - 5
     for i in range(0, len(graph_values), chunk_size):
@@ -175,7 +150,6 @@ def send_history(device, readings):
 
 def get_trend_code(reading):
     """Extract trend code from a pydexcom GlucoseReading."""
-    # reading.trend returns int 0-9 matching our firmware constants directly
     trend = getattr(reading, "trend", 0)
     return trend if isinstance(trend, int) and 0 <= trend <= 9 else 0
 
@@ -187,6 +161,108 @@ def get_minutes_ago(reading):
         return 0
     delta = datetime.now(dt.tzinfo) - dt if dt.tzinfo else datetime.now() - dt
     return min(int(delta.total_seconds() / 60), 255)
+
+
+class KeyboardPool:
+    """Maintains open HID handles for every detected VIA keyboard and
+    re-scans for new plug-ins on a timer."""
+
+    def __init__(self, config_pkt, history_capacity=24):
+        # config_pkt is replayed to each newly connected keyboard, followed
+        # by the cached history (so hot-plugged boards get the full graph).
+        self.config_pkt = config_pkt
+        self.history = []  # list of {"mgdl": X}, newest first
+        self.history_capacity = history_capacity
+        self.connections = {}  # path -> (device, label)
+        self._last_scan = 0
+
+    def set_history(self, readings):
+        """Seed the cached history; newest first."""
+        self.history = list(readings)[:self.history_capacity]
+
+    def push_reading(self, mgdl):
+        """Prepend a new reading if it differs from the latest cached one."""
+        if self.history and self.history[0]["mgdl"] == mgdl:
+            return
+        self.history.insert(0, {"mgdl": mgdl})
+        del self.history[self.history_capacity:]
+
+    def sync(self, force=False):
+        """Open newly-appeared keyboards and drop any that no longer enumerate."""
+        now = time.monotonic()
+        if not force and now - self._last_scan < RESCAN_INTERVAL:
+            return
+        self._last_scan = now
+
+        current = {d["path"]: d for d in enumerate_keyboards()}
+
+        # Drop keyboards that vanished from enumeration.
+        for path in list(self.connections):
+            if path not in current:
+                self._close(path, reason="unplugged")
+
+        # Open any newly-seen keyboards.
+        for path, info in current.items():
+            if path in self.connections:
+                continue
+            device = open_device(info)
+            if device is None:
+                continue
+            label = describe(info)
+            self.connections[path] = (device, label)
+            print(f"Connected: {label}")
+            if not self._send_init(path, device):
+                self._close(path, reason="init failed")
+
+    def _send_init(self, path, device):
+        if not hid_write(device, b'\x00' + self.config_pkt):
+            return False
+        time.sleep(0.02)
+        if self.history and not send_history(device, self.history):
+            return False
+        return True
+
+    def _close(self, path, reason=""):
+        entry = self.connections.pop(path, None)
+        if entry is None:
+            return
+        device, label = entry
+        try:
+            device.close()
+        except Exception:
+            pass
+        suffix = f" ({reason})" if reason else ""
+        print(f"Disconnected: {label}{suffix}")
+
+    def broadcast(self, packet):
+        """Send `packet` (without report-id prefix) to every connected keyboard.
+        Drops any keyboard whose write fails."""
+        if not self.connections:
+            return 0
+        dead = []
+        sent = 0
+        for path, (device, _label) in self.connections.items():
+            if hid_write(device, b'\x00' + packet):
+                sent += 1
+            else:
+                dead.append(path)
+        for path in dead:
+            self._close(path, reason="write failed")
+        return sent
+
+    def send_history(self, readings):
+        """Send history to every connected keyboard; drop any that fails."""
+        if not self.connections:
+            return
+        dead = []
+        for path, (device, _label) in self.connections.items():
+            if not send_history(device, readings):
+                dead.append(path)
+        for path in dead:
+            self._close(path, reason="history send failed")
+
+    def __len__(self):
+        return len(self.connections)
 
 
 def main():
@@ -215,54 +291,33 @@ def main():
     dex = Dexcom(username=args.username, password=args.password, region=region_map[args.region])
     print("Authenticated.")
 
+    # Pre-build the config packet; it is replayed to each new keyboard on connect.
+    config_pkt = build_config_packet(unit, args.low, args.high)
+    pool = KeyboardPool(config_pkt)
+
+    # Seed the pool's cached history first, so the very first keyboard that
+    # connects (and any later hot-plug reconnects) immediately receives it.
+    try:
+        readings = dex.get_glucose_readings(max_count=24, minutes=1440)
+        if readings:
+            pool.set_history([{"mgdl": r.value} for r in readings])
+            print(f"Cached {len(pool.history)} historical readings.")
+    except Exception as e:
+        print(f"Warning: Could not load history: {e}")
+
+    print("Waiting for keyboards...")
+    while len(pool) == 0:
+        pool.sync(force=True)
+        if len(pool) == 0:
+            time.sleep(RESCAN_INTERVAL)
+
+    print(f"Polling every {args.interval}s, broadcasting to {len(pool)} keyboard(s). "
+          "Press Ctrl+C to stop.")
+
     last_value = None
-    device = None
-    device_path = None
-
-    def disconnect():
-        nonlocal device, device_path
-        print("Keyboard disconnected.")
-        try:
-            device.close()
-        except Exception:
-            pass
-        device = None
-        device_path = None
-
-    def connect_and_configure():
-        """Wait for keyboard, send config and history. Returns (device, path) or (None, None)."""
-        nonlocal dex
-        print("Waiting for keyboard...")
-        dev, path = open_keyboard()
-        print("Connected to keyboard.")
-
-        hid_write(dev, b'\x00' + build_config_packet(unit, args.low, args.high))
-        print(f"Config sent: unit={'mmol/L' if unit else 'mg/dL'}, low={args.low}, high={args.high}")
-
-        try:
-            readings = dex.get_glucose_readings(max_count=24, minutes=1440)
-            if readings:
-                history = [{"mgdl": r.value} for r in readings]
-                if send_history(dev, history):
-                    print(f"Sent {len(history)} historical readings.")
-                else:
-                    print("Keyboard disconnected during history send.")
-                    return None, None
-        except Exception as e:
-            print(f"Warning: Could not load history: {e}")
-
-        return dev, path
-
-    device, device_path = connect_and_configure()
-
-    print(f"Polling every {args.interval}s. Press Ctrl+C to stop.")
 
     while True:
-        # Reconnect if needed
-        if device is None:
-            device, device_path = connect_and_configure()
-            if device is None:
-                continue
+        pool.sync()
 
         try:
             reading = dex.get_current_glucose_reading()
@@ -277,36 +332,34 @@ def main():
                 else:
                     display_val = f"{mgdl} mg/dL"
 
+                pool.push_reading(mgdl)
                 pkt = build_reading_packet(mgdl, trend, mins)
-                if not hid_write(device, b'\x00' + pkt):
-                    disconnect()
-                    continue
+                pool.broadcast(pkt)
 
                 if last_value != mgdl:
                     last_value = mgdl
                     trend_desc = getattr(reading, "trend_description", "?")
                     print(f"[{datetime.now().strftime('%H:%M')}] {display_val} "
-                          f"({trend_desc}, {mins}m ago)")
+                          f"({trend_desc}, {mins}m ago) -> {len(pool)} kb")
             else:
                 print(f"[{datetime.now().strftime('%H:%M')}] No reading available.")
-
-        except OSError:
-            disconnect()
-            continue
 
         except Exception as e:
             print(f"Error: {e}")
             # Re-authenticate if session expired
             if "session" in str(e).lower() or "auth" in str(e).lower():
                 try:
-                    dex = Dexcom(username=args.username, password=args.password, region=region_map[args.region])
+                    dex = Dexcom(username=args.username, password=args.password,
+                                 region=region_map[args.region])
                     print("Re-authenticated.")
                 except Exception as re_err:
                     print(f"Re-auth failed: {re_err}")
 
-        # Monitor keyboard during sleep — detect unplug/replug quickly
-        if device and not wait_with_monitor(device, device_path, args.interval):
-            disconnect()
+        # Sleep in small increments so we can pick up hot-plugs quickly.
+        end = time.monotonic() + args.interval
+        while time.monotonic() < end:
+            time.sleep(min(1.0, end - time.monotonic()))
+            pool.sync()
 
 
 if __name__ == "__main__":

@@ -3,12 +3,21 @@
 
 #include QMK_KEYBOARD_H
 #include "lib/custom_keycodes.h"
+#include "lib/g7_sync.h"
 #include "transactions.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include "timer.h"
 #include "oled_driver.h" // adjust if your project uses a different oled header
+
+// VIA custom value command hook - receives G7 glucose data from host over raw HID.
+// Host packet format: [0x07 (id_custom_set_value), G7_VIA_CHANNEL (0xA0), sub_cmd, payload...]
+void via_custom_value_command_kb(uint8_t *data, uint8_t length) {
+    if (length >= 3 && data[1] == G7_VIA_CHANNEL) {
+        g7_process_hid(&data[2], length - 2);
+    }
+}
 
 // clang-format off
 // レイヤー名
