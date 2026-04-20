@@ -4,7 +4,7 @@
 #include "quantum.h"
 #include "lib/common_killerwhale.h"
 #include "lib/custom_oled.h"
-#include "lib/g7_sync.h"
+#include "g7_sync.h"
 
 // レイヤーごとの発光場所、発光色の設定
 const rgblight_segment_t PROGMEM base_layer[] = RGBLIGHT_LAYER_SEGMENTS( { 0, 0, HSV_YELLOW} );

@@ -3,7 +3,7 @@
 
 #include QMK_KEYBOARD_H
 #include "lib/custom_keycodes.h"
-#include "lib/g7_sync.h"
+#include "g7_sync.h"
 #include "transactions.h"
 #include <stdint.h>
 #include <stdbool.h>

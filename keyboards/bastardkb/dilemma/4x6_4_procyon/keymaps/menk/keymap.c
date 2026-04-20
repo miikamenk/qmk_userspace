@@ -19,10 +19,12 @@
 #include QMK_KEYBOARD_H
 #include "transactions.h"
 #include "raw_hid.h"
-#include "g7_sync.c"
 #include <ctype.h>
 #ifdef COMMUNITY_MODULE_QP_HELPERS_ENABLE
 #    include "qp_helpers.h"
+#endif
+#ifdef COMMUNITY_MODULE_G7_SYNC_ENABLE
+#    include "g7_sync.h"
 #endif
 
 enum dilemma_keymap_layers {
@@ -1551,7 +1553,6 @@ void keyboard_post_init_user(void) {
     transaction_register_rpc(USER_SYNC_CAPS_WORD, user_sync_caps_word_recv);
     transaction_register_rpc(USER_SYNC_MODE, user_sync_mode_recv);
     transaction_register_rpc(USER_SYNC_KEYLOGGER, user_sync_keylogger_recv);
-    transaction_register_rpc(USER_SYNC_G7, g7_sync_recv);
 
     g7_init();
     keylogger_init();
@@ -1699,22 +1700,7 @@ void housekeeping_task_user(void) {
             transaction_rpc_send(USER_SYNC_MODE, sizeof(mode), &mode);
         }
 
-        // G7 SYNC - send glucose data to slave for display
-        {
-            static uint32_t last_g7_sync = 0;
-            static uint16_t last_g7_glucose = 0xFFFF;
-            g7_data_t *g7 = g7_get_data();
-
-            if (g7->valid && (timer_elapsed32(last_g7_sync) > 1000 || last_g7_glucose != g7->glucose_mgdl)) {
-                last_g7_sync    = timer_read32();
-                last_g7_glucose = g7->glucose_mgdl;
-
-                g7_sync_t sync_data;
-                memcpy(&sync_data.data, g7, sizeof(g7_data_t));
-                memcpy(sync_data.graph, g7_get_graph(), G7_GRAPH_SAMPLES);
-                transaction_rpc_send(USER_SYNC_G7, sizeof(sync_data), &sync_data);
-            }
-        }
+        g7_sync_task();
 
         // BUFFERED KEYLOGGER SYNC - Throttled to prevent lag
         if (display_mode == 1) {
