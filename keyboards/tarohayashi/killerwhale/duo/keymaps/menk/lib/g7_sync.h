@@ -49,6 +49,7 @@ typedef struct {
 typedef struct {
     g7_data_t data;
     uint8_t   graph[G7_GRAPH_SAMPLES];
+    uint32_t  ms_since_reading;     // master's timer_elapsed32(g7_last_reading_time) at send
 } g7_sync_t;
 
 void       g7_init(void);

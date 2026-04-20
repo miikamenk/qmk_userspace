@@ -100,24 +100,36 @@ void g7_process_hid(uint8_t *data, uint8_t length) {
 
 void g7_sync_recv(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
     if (in_buflen == sizeof(g7_sync_t)) {
-        const g7_sync_t *sync = (const g7_sync_t *)in_data;
-        memcpy(&g7_data, &sync->data, sizeof(g7_data_t));
-        memcpy(g7_graph, sync->graph, G7_GRAPH_SAMPLES);
+        // in_data isn't guaranteed to be 4-byte aligned; copy into a local
+        // aligned struct before touching uint32_t fields (Cortex-M0+ faults
+        // on unaligned word loads).
+        g7_sync_t sync;
+        memcpy(&sync, in_data, sizeof(g7_sync_t));
+        memcpy(&g7_data, &sync.data, sizeof(g7_data_t));
+        memcpy(g7_graph, sync.graph, G7_GRAPH_SAMPLES);
+        // Reconstruct a local timer anchor so timer_elapsed32() on the slave
+        // matches the master's sense of "ms since last HID reading".
+        g7_last_reading_time = timer_read32() - sync.ms_since_reading;
     }
 }
 
 void g7_sync_task(void) {
     if (!is_keyboard_master()) return;
 
-    static uint32_t  last_sync = 0;
-    static g7_sync_t last_sent = {0};
+    static uint32_t  last_sync       = 0;
+    static g7_data_t last_sent_data  = {0};
+    static uint8_t   last_sent_graph[G7_GRAPH_SAMPLES] = {0};
     g7_sync_t        current;
 
     memcpy(&current.data, &g7_data, sizeof(g7_data_t));
     memcpy(current.graph, g7_graph, G7_GRAPH_SAMPLES);
+    current.ms_since_reading = timer_elapsed32(g7_last_reading_time);
 
+    // ms_since_reading changes every tick, so exclude it from change detection —
+    // otherwise we'd flood the split link. The 1s fallback keeps the slave fresh.
     bool needs_sync = false;
-    if (memcmp(&current, &last_sent, sizeof(g7_sync_t)) != 0) {
+    if (memcmp(&current.data, &last_sent_data, sizeof(g7_data_t)) != 0 ||
+        memcmp(current.graph, last_sent_graph, G7_GRAPH_SAMPLES) != 0) {
         needs_sync = true;
     } else if (timer_elapsed32(last_sync) > 1000) {
         needs_sync = true;
@@ -125,6 +137,7 @@ void g7_sync_task(void) {
 
     if (needs_sync && transaction_rpc_send(USER_SYNC_G7, sizeof(g7_sync_t), &current)) {
         last_sync = timer_read32();
-        memcpy(&last_sent, &current, sizeof(g7_sync_t));
+        memcpy(&last_sent_data, &current.data, sizeof(g7_data_t));
+        memcpy(last_sent_graph, current.graph, G7_GRAPH_SAMPLES);
     }
 }
