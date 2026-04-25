@@ -317,12 +317,12 @@ bool process_record_addedkeycodes(uint16_t keycode, keyrecord_t *record) {
         case QK_USER_8: handle_mode_tap_fallback(record, keycode, KC_LNG2, is_slow_mode); return false;
 
         // Pointer buttons + slow
-        case QK_USER_9:  handle_btn_slow(record, keycode, KC_BTN1); return false;
+        case QK_USER_9:  handle_btn_slow(record, keycode, MS_BTN1); return false;
         case QK_USER_10:
-            handle_btn_slow(record, keycode, KC_BTN2);
+            handle_btn_slow(record, keycode, MS_BTN2);
             if (record->event.pressed) oled_interrupt(QK_USER_4);
             return false;
-        case QK_USER_11: handle_btn_slow(record, keycode, KC_BTN3); return false;
+        case QK_USER_11: handle_btn_slow(record, keycode, MS_BTN3); return false;
 
         case QK_USER_12:
             is_cursor_mode(record->event.pressed);
