@@ -13,6 +13,24 @@
 #include <string.h>
 #include <stdio.h>
 
+// Slave-side mirror of the master's caps word state, kept in sync via
+// USER_SYNC_CAPS_WORD; defined in keymap.c.
+extern bool kw_caps_word_on;
+#ifdef CAPS_WORD_ENABLE
+// Master-side: pushes is_caps_word_on() to the slave when it changes.
+void kw_caps_word_sync_task(void);
+#endif
+
+// True when caps word is active on whichever side we are. Master can ask QMK
+// directly; slave reads the synced flag.
+static bool caps_word_active(void) {
+#ifdef CAPS_WORD_ENABLE
+    return is_keyboard_master() ? is_caps_word_on() : kw_caps_word_on;
+#else
+    return false;
+#endif
+}
+
 // ---- State ----
 static bool     interrupted;
 static uint16_t interrupted_time;
@@ -253,12 +271,23 @@ static void render_mod_overlay(void) {
     }
 }
 
+static void render_caps_word_overlay(void) {
+    oled_set_cursor(0, 3);
+    oled_write_P(PSTR("CAPS WORD            "), false);
+}
+
 static void render_info_view(void) {
     render_speed_line();
     render_angle_line();
     render_axis_line();
     render_mode_line();
-    render_mod_overlay();
+    if (caps_word_active()) {
+        // Caps word takes the bottom row over from MODE/mod overlay so the
+        // active state is unmissable while typing.
+        render_caps_word_overlay();
+    } else {
+        render_mod_overlay();
+    }
 }
 
 // ---- G7 glucose view ----
@@ -479,6 +508,11 @@ void housekeeping_task_kb(void) {
     }
     kw_config_sync_task();
     g7_sync_task();
+#ifdef CAPS_WORD_ENABLE
+    if (is_keyboard_master()) {
+        kw_caps_word_sync_task();
+    }
+#endif
 }
 
 // ---- Interrupt / temp-char setters ----

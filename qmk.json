@@ -3,6 +3,7 @@
     "build_targets": [
         ["bastardkb/dilemma/3x5_2", "menk"],
         ["mechboards/sofle/pro", "bingu"],
-        ["bastardkb/dilemma/4x6_4_procyon", "menk"]
+        ["bastardkb/dilemma/4x6_4_procyon", "menk"],
+        ["tarohayashi/killerwhale/duo", "menk"]
     ]
 }

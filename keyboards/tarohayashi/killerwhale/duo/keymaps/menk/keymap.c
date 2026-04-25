@@ -8,8 +8,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 #include "timer.h"
 #include "oled_driver.h" // adjust if your project uses a different oled header
+
+// Caps Word slave-side mirror; updated via RPC from master each time the
+// master's caps word state changes. The slave OLED reads this to draw a flag.
+bool kw_caps_word_on = false;
 
 // VIA custom value command hook - receives G7 glucose data from host over raw HID.
 // Host packet format: [0x07 (id_custom_set_value), G7_VIA_CHANNEL (0xA0), sub_cmd, payload...]
@@ -18,6 +23,62 @@ void via_custom_value_command_kb(uint8_t *data, uint8_t length) {
         g7_process_hid(&data[2], length - 2);
     }
 }
+
+#ifdef CAPS_WORD_ENABLE
+// Mirror dilemma 4x6_4 caps_word behavior: continue caps word for letters and
+// punctuation that's part of a typical identifier, plus digits / dashes /
+// underscores / dots / commas / backspace.
+bool caps_word_press_user(uint16_t keycode) {
+    switch (keycode) {
+        case KC_A ... KC_Z:
+        case KC_SCLN:
+        case KC_QUOT:
+        case KC_SLSH:
+            add_weak_mods(MOD_BIT(KC_LSFT));  // Apply shift to next key.
+            return true;
+
+        // Keycodes that continue Caps Word, without shifting.
+        case KC_1 ... KC_0:
+        case KC_BSPC:
+        case KC_DEL:
+        case KC_MINS:
+        case KC_DOT:
+        case KC_COMM:
+        case KC_UNDS:
+            return true;
+
+        default:
+            return false;  // Deactivate Caps Word.
+    }
+}
+#endif
+
+// Slave-side receiver: store the master's caps word state for OLED display.
+static void user_sync_caps_word_recv(uint8_t in_buflen, const void *in_data,
+                                     uint8_t out_buflen, void *out_data) {
+    if (in_buflen == sizeof(kw_caps_word_on)) {
+        memcpy(&kw_caps_word_on, in_data, in_buflen);
+    }
+}
+
+void keyboard_post_init_user(void) {
+    transaction_register_rpc(USER_SYNC_CAPS_WORD, user_sync_caps_word_recv);
+}
+
+#ifdef CAPS_WORD_ENABLE
+// Push caps word state to the slave when it changes. Called from
+// housekeeping_task_kb (in custom_oled.c) on the master only.
+void kw_caps_word_sync_task(void) {
+    static bool last_sent = false;
+    bool        cur       = is_caps_word_on();
+    if (cur != last_sent) {
+        if (transaction_rpc_send(USER_SYNC_CAPS_WORD, sizeof(cur), &cur)) {
+            last_sent       = cur;
+            kw_caps_word_on = cur;
+        }
+    }
+}
+#endif
 
 // clang-format off
 // レイヤー名

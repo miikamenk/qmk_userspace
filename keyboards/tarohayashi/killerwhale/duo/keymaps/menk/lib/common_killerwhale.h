@@ -56,6 +56,8 @@ void     is_cursor_mode(bool is_force_scrolling);
 void     is_key_mode(bool is_force_key_input);
 void     is_game_mode(bool is_force_gaming);
 void     is_slow_mode(bool is_slow_mode);
+void     is_word_nav_mode(bool is_force_word_nav); // hold = trackball jumps words
+void     is_word_sel_mode(bool is_force_word_sel); // hold = trackball selects words
 
 bool get_dpad_exclusion(void);
 void toggle_dpad_exclusion(void);

@@ -4,3 +4,6 @@
 [submodule "modules/menk"]
 	path = modules/menk
 	url = ../qmk_modules
+[submodule "modules/getreuer"]
+	path = modules/getreuer
+	url = https://github.com/getreuer/qmk-modules.git

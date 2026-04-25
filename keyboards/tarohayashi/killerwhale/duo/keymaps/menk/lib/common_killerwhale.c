@@ -8,12 +8,14 @@
 #include "joystick.h"
 #include "lib/add_keycodes.h"
 #include "lib/add_oled.h"
+#include "select_word.h"
+#include <string.h>
 
 joystick_config_t joystick_axes[JOYSTICK_AXIS_COUNT] = {JOYSTICK_AXIS_VIRTUAL, JOYSTICK_AXIS_VIRTUAL};
 
 /* ポインティングデバイス用変数 */
-kw_config_t kw_config;                                                                  // eeprom保存用
-bool        force_scrolling, force_cursoring, force_key_input, force_gaming, slow_mode; // 一時的モード変更用
+kw_config_t kw_config;                                                                                                // eeprom保存用
+bool        force_scrolling, force_cursoring, force_key_input, force_gaming, slow_mode, force_word_nav, force_word_sel; // 一時的モード変更用
 uint8_t     joystick_attached;                                                          // ジョイスティックの有無
 float       h_accumulator_l, v_accumulator_l, h_accumulator_r, v_accumulator_r;         // 端数保存用
 float       x_accumulator_l, y_accumulator_l, x_accumulator_r, y_accumulator_r;
@@ -70,6 +72,10 @@ bool is_mouse_record_kb(uint16_t keycode, keyrecord_t *record) {
             return true;
         case QK_USER_12: // 一時的にカーソル移動
             return true;
+        case QK_USER_27: // 一時的に単語ジャンプ (WORD_NAV)
+            return true;
+        case QK_USER_28: // 一時的に単語選択 (WORD_SEL)
+            return true;
         default:
             return false;
     }
@@ -78,8 +84,9 @@ bool is_mouse_record_kb(uint16_t keycode, keyrecord_t *record) {
 }
 // 実タスク
 bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
-    // 追加キーコードタスク
-    process_record_addedkeycodes(keycode, record);
+    if (!process_record_addedkeycodes(keycode, record)) {
+        return false;
+    }
 
     // D-Padの同時押しを防ぐ
     keypos_t key = record->event.key;
@@ -119,6 +126,81 @@ bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
     return process_record_user(keycode, record);
 }
 
+/* 単語ナビ・選択用 */
+// Trackball-driven word navigation/selection.
+//
+// Both modes accumulate horizontal trackball deltas independently of the
+// existing mouse pipeline, so dragging horizontally taps Ctrl/Opt+Arrow (nav)
+// or extends a getreuer select_word run. Vertical motion is ignored — the
+// gestures are intentionally one-dimensional.
+//
+// Threshold (counts per tap) and rate-limit (ms between taps) are
+// deliberately a few times larger than the cursor pipeline so a small drift
+// doesn't fire word jumps; the user has to make a deliberate horizontal
+// stroke.
+#define WORD_GESTURE_THRESHOLD 85.0f
+#define WORD_GESTURE_TIMEOUT 10
+static float    word_x_accum   = 0.0f;
+static uint16_t word_last_tap  = 0;
+static int8_t   word_last_dir  = 0;
+static uint16_t word_mode_start = 0;
+
+static void word_gesture_reset(void) {
+    word_x_accum    = 0.0f;
+    word_last_dir   = 0;
+    word_last_tap   = 0;
+    word_mode_start = 0;
+}
+
+static void word_gesture_start(void) {
+    word_gesture_reset();
+    word_mode_start = timer_read();
+}
+
+// Steps a word gesture by `dx`, invoking `tap_fn(backward)` when the
+// accumulator crosses the threshold (rate-limited). `dx` is the combined
+// horizontal trackball delta for this tick.
+static void process_word_gesture(float dx, void (*tap_fn)(bool backward)) {
+    if (word_mode_start && timer_elapsed(word_mode_start) > 2000) {
+        word_gesture_reset();
+        word_mode_start = timer_read();
+    }
+
+    word_x_accum += dx;
+
+    if (word_x_accum >= WORD_GESTURE_THRESHOLD &&
+        timer_elapsed(word_last_tap) > WORD_GESTURE_TIMEOUT) {
+        tap_fn(false);
+        word_x_accum -= WORD_GESTURE_THRESHOLD;
+        word_last_tap = timer_read();
+        word_last_dir = +1;
+    } else if (word_x_accum <= -WORD_GESTURE_THRESHOLD &&
+               timer_elapsed(word_last_tap) > WORD_GESTURE_TIMEOUT) {
+        tap_fn(true);
+        word_x_accum += WORD_GESTURE_THRESHOLD;
+        word_last_tap = timer_read();
+        word_last_dir = -1;
+    }
+}
+
+static void word_nav_tap(bool backward) {
+    static bool cached_is_apple = false;
+    static bool cache_valid     = false;
+    if (!cache_valid) {
+        os_variant_t os = detected_host_os();
+        cached_is_apple = (os == OS_MACOS || os == OS_IOS);
+        cache_valid     = true;
+    }
+    uint16_t mod = cached_is_apple ? KC_LOPT : KC_LCTL;
+    register_code(mod);
+    tap_code(backward ? KC_LEFT : KC_RIGHT);
+    unregister_code(mod);
+}
+
+static void word_sel_tap(bool backward) {
+    select_word_tap(backward ? 'B' : 'W');
+}
+
 /* マトリクス走査 */
 // 初期化
 void matrix_init_kb(void) {
@@ -143,6 +225,8 @@ void matrix_init_kb(void) {
     force_scrolling     = false;
     force_cursoring     = false;
     force_key_input     = false;
+    force_word_nav      = false;
+    force_word_sel      = false;
     pressed_up_l        = false;
     pressed_up_r        = false;
     pressed_down_l      = false;
@@ -644,8 +728,15 @@ report_mouse_t pointing_device_task_combined_user(report_mouse_t left_report, re
             forced       = JOYSTICK_RIGHT;
         }
     }
-    // 一時的モード変更
-    if (force_cursoring) {
+    // Word-jump and word-select gestures take priority over the regular
+    // trackball pipeline: while held, X movement drives word-level taps and
+    // the cursor stays put.
+    if (force_word_nav || force_word_sel) {
+        process_word_gesture(x_rev_l + x_rev_r,
+                             force_word_nav ? word_nav_tap : word_sel_tap);
+        memset(&left_report, 0, sizeof(left_report));
+        memset(&right_report, 0, sizeof(right_report));
+    } else if (force_cursoring) {
         left_report  = pointing_device_cursoring(true, x_rev_l, y_rev_l);
         right_report = pointing_device_cursoring(false, x_rev_r, y_rev_r);
     } else if (force_scrolling) {
@@ -776,6 +867,25 @@ void is_key_mode(bool is_force_key_input) {
 }
 void is_game_mode(bool is_force_gaming) {
     force_gaming = is_force_gaming;
+    clear_keyinput();
+}
+void is_word_nav_mode(bool is_force_word_nav) {
+    force_word_nav = is_force_word_nav;
+    if (is_force_word_nav) {
+        word_gesture_start();
+    } else {
+        word_gesture_reset();
+    }
+    clear_keyinput();
+}
+void is_word_sel_mode(bool is_force_word_sel) {
+    force_word_sel = is_force_word_sel;
+    if (is_force_word_sel) {
+        word_gesture_start();
+    } else {
+        word_gesture_reset();
+        select_word_unregister();
+    }
     clear_keyinput();
 }
 void is_slow_mode(bool is_slow_mode) {

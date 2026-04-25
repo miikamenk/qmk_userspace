@@ -5,6 +5,8 @@
 #include "os_detection.h"
 #include "lib/common_killerwhale.h"
 #include "custom_oled.h"
+#include "select_word.h"
+#include "caps_word.h"
 
 static uint16_t startup_timer;
 
@@ -255,6 +257,46 @@ bool process_record_addedkeycodes(uint16_t keycode, keyrecord_t *record) {
         case MOD_SCRL:
             is_scroll_mode(record->event.pressed);
             oled_tempch(record->event.pressed, keycode);
+            return false;
+
+        // Hold WORD_NAV: trackball X drives Ctrl/Opt + Left/Right (word jump).
+        case WORD_NAV:
+            is_word_nav_mode(record->event.pressed);
+            oled_tempch(record->event.pressed, keycode);
+            return false;
+
+        // Hold WORD_SEL: trackball X drives getreuer select_word forward/back.
+        case WORD_SEL:
+            is_word_sel_mode(record->event.pressed);
+            oled_tempch(record->event.pressed, keycode);
+            return false;
+
+        // Tap aliases so the Vial-style configurator (which only enumerates
+        // QK_USER_0..31) can bind QMK's caps word toggle and the getreuer
+        // SELECT_WORD / SELECT_WORD_BACK keycodes.
+#ifdef CAPS_WORD_ENABLE
+        case CWTOGG:
+            if (record->event.pressed) {
+                caps_word_toggle();
+                oled_interrupt(keycode);
+            }
+            return false;
+#endif
+        case SELWFWD:
+            if (record->event.pressed) {
+                select_word_register('W');
+                oled_interrupt(keycode);
+            } else {
+                select_word_unregister();
+            }
+            return false;
+        case SELWBWD:
+            if (record->event.pressed) {
+                select_word_register('B');
+                oled_interrupt(keycode);
+            } else {
+                select_word_unregister();
+            }
             return false;
 
         // Scroll + tap-fallback
