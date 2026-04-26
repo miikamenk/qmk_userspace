@@ -8,6 +8,8 @@
 #include "joystick.h"
 #include "lib/add_keycodes.h"
 #include "lib/add_oled.h"
+#include "select_word.h"
+#include "pointing_device.h"
 #include <string.h>
 
 joystick_config_t joystick_axes[JOYSTICK_AXIS_COUNT] = {JOYSTICK_AXIS_VIRTUAL, JOYSTICK_AXIS_VIRTUAL};
@@ -346,6 +348,12 @@ void pointing_device_init_kb(void) {
     pointing_device_set_cpi_on_side(true, 400 + kw_config.spd_l * 200);
     pointing_device_set_cpi_on_side(false, 400 + kw_config.spd_r * 200);
     set_auto_mouse_enable(kw_config.auto_mouse);
+
+    // The left half's PMW3360 fails the signature check at boot but its
+    // motion-burst reads still work. QMK PR #25315 gates pointing_device_task
+    // on status==SUCCESS, which kills the entire pipeline whenever that side
+    // is master. Force SUCCESS to restore the pre-#25315 behavior.
+    pointing_device_set_status(POINTING_DEVICE_STATUS_SUCCESS);
 
     pointing_device_init_user();
 }
