@@ -8,6 +8,11 @@
 // ジョイスティックの状態
 enum jsmode { NO_JOYSTICK = 0, JOYSTICK_LEFT, JOYSTICK_RIGHT };
 
+// WORD_NAV target context. Cycled by CTX_CYCLE; selects which keystrokes the
+// trackball gesture emits so the same physical motion does the right thing in
+// a desktop text field, a terminal (readline), or neovim normal mode.
+typedef enum { WN_CTX_GUI = 0, WN_CTX_TERM, WN_CTX_NVIM, WN_CTX_COUNT } wn_ctx_t;
+
 enum {
     STATE_OFF     = 0,
     STATE_LAYER   = 1,
@@ -56,8 +61,11 @@ void     is_cursor_mode(bool is_force_scrolling);
 void     is_key_mode(bool is_force_key_input);
 void     is_game_mode(bool is_force_gaming);
 void     is_slow_mode(bool is_slow_mode);
-void     is_word_nav_mode(bool is_force_word_nav); // hold = trackball jumps words
-void     is_word_sel_mode(bool is_force_word_sel); // hold = trackball selects words
+void     is_word_nav_mode(bool is_force_word_nav); // hold = trackball does word-level motion
+void     is_char_nav_mode(bool is_force_char_nav); // hold = trackball does bare-arrow motion
+
+void     wn_ctx_cycle(void); // CTX_CYCLE: advance GUI -> TERM -> NVIM -> GUI
+wn_ctx_t wn_ctx_get(void);   // current word-nav target context
 
 bool get_dpad_exclusion(void);
 void toggle_dpad_exclusion(void);

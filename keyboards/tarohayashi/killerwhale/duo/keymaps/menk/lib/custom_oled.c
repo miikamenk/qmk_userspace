@@ -71,12 +71,24 @@ static const char* side_label(bool is_right) {
     return is_right ? PSTR(" R:") : PSTR(" L:");
 }
 
-static const char* pd_mode_label(uint8_t mode) {
+// 3-char mode label used by the MODE row, sized to share the line with the
+// word-nav context tag.
+static const char* pd_mode_label_short(uint8_t mode) {
     switch (mode) {
-        case SCROLL_MODE: return PSTR("SCROL");
-        case CURSOR_MODE: return PSTR("CURSR");
-        case GAME_MODE:   return PSTR(" GAME");
-        default:          return PSTR("  KEY");
+        case SCROLL_MODE: return PSTR("SCR");
+        case CURSOR_MODE: return PSTR("CUR");
+        case GAME_MODE:   return PSTR("GAM");
+        default:          return PSTR("KEY");
+    }
+}
+
+// Single-character tag for the current word-nav target context.
+static char wn_ctx_tag(void) {
+    switch (wn_ctx_get()) {
+        case WN_CTX_TERM: return 'T';
+        case WN_CTX_NVIM: return 'N';
+        case WN_CTX_GUI:
+        default:          return 'G';
     }
 }
 
@@ -178,6 +190,14 @@ static void render_interrupt_line(uint16_t type) {
             oled_write_P(kw_config.rgb_layers ? PSTR("RGBLIGHT LAYER ON    ")
                                               : PSTR("RGBLIGHT LAYER OFF   "), false);
             break;
+        case CTX_CYCLE:
+            switch (wn_ctx_get()) {
+                case WN_CTX_TERM: oled_write_P(PSTR("WORD NAV: TERM       "), false); break;
+                case WN_CTX_NVIM: oled_write_P(PSTR("WORD NAV: NVIM       "), false); break;
+                case WN_CTX_GUI:
+                default:          oled_write_P(PSTR("WORD NAV: GUI        "), false); break;
+            }
+            break;
         case QK_USER_22:
         case QK_USER_23:
             oled_write_P(PSTR("OFFSET MIN: "), false);
@@ -241,12 +261,16 @@ static void render_axis_line(void) {
 }
 
 static void render_mode_line(void) {
+    // Shape: "MODE L:CUR R:CUR WN:G" — exactly 21 columns. Mode labels are
+    // truncated to 3 chars to make room for the word-nav context tag.
     oled_set_cursor(0, 3);
     oled_write_P(PSTR("MODE"), false);
     oled_write_P(side_label(false), false);
-    oled_write_P(pd_mode_label(kw_config.pd_mode_l), false);
+    oled_write_P(pd_mode_label_short(kw_config.pd_mode_l), false);
     oled_write_P(side_label(true), false);
-    oled_write_P(pd_mode_label(kw_config.pd_mode_r), false);
+    oled_write_P(pd_mode_label_short(kw_config.pd_mode_r), false);
+    oled_write_P(PSTR(" WN:"), false);
+    oled_write_char(wn_ctx_tag(), false);
 }
 
 // Overwrites row 3 with held modifiers when any are active.

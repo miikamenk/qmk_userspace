@@ -8,14 +8,13 @@
 #include "joystick.h"
 #include "lib/add_keycodes.h"
 #include "lib/add_oled.h"
-#include "select_word.h"
 #include <string.h>
 
 joystick_config_t joystick_axes[JOYSTICK_AXIS_COUNT] = {JOYSTICK_AXIS_VIRTUAL, JOYSTICK_AXIS_VIRTUAL};
 
 /* ポインティングデバイス用変数 */
 kw_config_t kw_config;                                                                                                // eeprom保存用
-bool        force_scrolling, force_cursoring, force_key_input, force_gaming, slow_mode, force_word_nav, force_word_sel; // 一時的モード変更用
+bool        force_scrolling, force_cursoring, force_key_input, force_gaming, slow_mode, force_word_nav, force_char_nav; // 一時的モード変更用
 uint8_t     joystick_attached;                                                          // ジョイスティックの有無
 float       h_accumulator_l, v_accumulator_l, h_accumulator_r, v_accumulator_r;         // 端数保存用
 float       x_accumulator_l, y_accumulator_l, x_accumulator_r, y_accumulator_r;
@@ -126,79 +125,147 @@ bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
     return process_record_user(keycode, record);
 }
 
-/* 単語ナビ・選択用 */
-// Trackball-driven word navigation/selection.
+/* 単語・文字ナビ用 */
+// Trackball-driven navigation gestures. Two hold-to-engage modes:
+//   WORD_NAV: word-level motion. Horizontal stroke = jump back/forward,
+//             vertical stroke = line up/down. Keystrokes depend on the
+//             active context (GUI / TERM / NVIM).
+//   CHAR_NAV: bare-arrow motion. Horizontal = Left/Right, vertical = Up/Down.
 //
-// Both modes accumulate horizontal trackball deltas independently of the
-// existing mouse pipeline, so dragging horizontally taps Ctrl/Opt+Arrow (nav)
-// or extends a getreuer select_word run. Vertical motion is ignored — the
-// gestures are intentionally one-dimensional.
+// Both pipelines accumulate trackball deltas independently of the cursor
+// pipeline; X and Y are tracked separately so a diagonal stroke fires both
+// axes. Selection is left to the user — held physical Shift rides through
+// every tap_code naturally.
 //
-// Threshold (counts per tap) and rate-limit (ms between taps) are
-// deliberately a few times larger than the cursor pipeline so a small drift
-// doesn't fire word jumps; the user has to make a deliberate horizontal
-// stroke.
-#define WORD_GESTURE_THRESHOLD 85.0f
-#define WORD_GESTURE_TIMEOUT 10
-static float    word_x_accum   = 0.0f;
-static uint16_t word_last_tap  = 0;
-static int8_t   word_last_dir  = 0;
+// Word-mode threshold is large so a small drift can't fire a word jump.
+// Char-mode threshold is ~1/3 of that for finer control.
+#define WORD_GESTURE_THRESHOLD 80.0f
+#define CHAR_GESTURE_THRESHOLD 40.0f
+#define GESTURE_TIMEOUT        2
+
+static float    word_x_accum    = 0.0f;
+static float    word_y_accum    = 0.0f;
+static uint16_t word_last_tap   = 0;
 static uint16_t word_mode_start = 0;
+
+static float    char_x_accum    = 0.0f;
+static float    char_y_accum    = 0.0f;
+static uint16_t char_last_tap   = 0;
+static uint16_t char_mode_start = 0;
+
+// Word-nav target context. GUI is the default; CTX_CYCLE advances it.
+static wn_ctx_t wn_ctx = WN_CTX_GUI;
+void     wn_ctx_cycle(void) { wn_ctx = (wn_ctx + 1) % WN_CTX_COUNT; }
+wn_ctx_t wn_ctx_get(void)   { return wn_ctx; }
 
 static void word_gesture_reset(void) {
     word_x_accum    = 0.0f;
-    word_last_dir   = 0;
+    word_y_accum    = 0.0f;
     word_last_tap   = 0;
     word_mode_start = 0;
 }
-
 static void word_gesture_start(void) {
     word_gesture_reset();
     word_mode_start = timer_read();
 }
 
-// Steps a word gesture by `dx`, invoking `tap_fn(backward)` when the
-// accumulator crosses the threshold (rate-limited). `dx` is the combined
-// horizontal trackball delta for this tick.
-static void process_word_gesture(float dx, void (*tap_fn)(bool backward)) {
+static void char_gesture_reset(void) {
+    char_x_accum    = 0.0f;
+    char_y_accum    = 0.0f;
+    char_last_tap   = 0;
+    char_mode_start = 0;
+}
+static void char_gesture_start(void) {
+    char_gesture_reset();
+    char_mode_start = timer_read();
+}
+
+// Generic per-axis stepper used by both word and char modes. Accumulates the
+// per-tick delta into *accum and fires tap_fn(negative) when |accum| crosses
+// `threshold`. Rate-limited by *last_tap so the host doesn't see a burst
+// faster than it can process.
+static void step_axis(float delta, float threshold,
+                      float *accum, uint16_t *last_tap,
+                      void (*tap_fn)(bool negative)) {
+    *accum += delta;
+    if (*accum >= threshold && timer_elapsed(*last_tap) > GESTURE_TIMEOUT) {
+        tap_fn(false);
+        *accum   -= threshold;
+        *last_tap = timer_read();
+    } else if (*accum <= -threshold && timer_elapsed(*last_tap) > GESTURE_TIMEOUT) {
+        tap_fn(true);
+        *accum   += threshold;
+        *last_tap = timer_read();
+    }
+}
+
+static bool host_is_apple_cached(void) {
+    static bool cached = false;
+    static bool valid  = false;
+    if (!valid) {
+        os_variant_t os = detected_host_os();
+        cached = (os == OS_MACOS || os == OS_IOS);
+        valid  = true;
+    }
+    return cached;
+}
+
+// Word-nav horizontal tap: dispatches on the current context.
+static void word_nav_tap_h(bool backward) {
+    switch (wn_ctx) {
+        case WN_CTX_TERM: {
+            register_code(KC_LALT);
+            tap_code(backward ? KC_B : KC_F);
+            unregister_code(KC_LALT);
+            break;
+        }
+        case WN_CTX_NVIM:
+            // Bare letter; physical Shift held by the user promotes to W/B.
+            tap_code(backward ? KC_B : KC_W);
+            break;
+        case WN_CTX_GUI:
+        default: {
+            uint16_t mod = host_is_apple_cached() ? KC_LOPT : KC_LCTL;
+            register_code(mod);
+            tap_code(backward ? KC_LEFT : KC_RIGHT);
+            unregister_code(mod);
+            break;
+        }
+    }
+}
+
+// Word-nav vertical tap: line up/down. NVIM uses k/j so user-held Shift
+// maps to K/J (still line motion in normal mode); other contexts use arrows.
+static void word_nav_tap_v(bool up) {
+    if (wn_ctx == WN_CTX_NVIM) {
+        tap_code(up ? KC_K : KC_J);
+    } else {
+        tap_code(up ? KC_UP : KC_DOWN);
+    }
+}
+
+static void char_nav_tap_h(bool backward) { tap_code(backward ? KC_LEFT : KC_RIGHT); }
+static void char_nav_tap_v(bool up)       { tap_code(up       ? KC_UP   : KC_DOWN);  }
+
+// Drives a two-axis gesture pipeline for the active mode. The 2-second idle
+// reset prevents a long held mode without motion from carrying stale
+// accumulator state into the next stroke.
+static void process_word_gesture(float dx, float dy) {
     if (word_mode_start && timer_elapsed(word_mode_start) > 2000) {
         word_gesture_reset();
         word_mode_start = timer_read();
     }
-
-    word_x_accum += dx;
-
-    if (word_x_accum >= WORD_GESTURE_THRESHOLD &&
-        timer_elapsed(word_last_tap) > WORD_GESTURE_TIMEOUT) {
-        tap_fn(false);
-        word_x_accum -= WORD_GESTURE_THRESHOLD;
-        word_last_tap = timer_read();
-        word_last_dir = +1;
-    } else if (word_x_accum <= -WORD_GESTURE_THRESHOLD &&
-               timer_elapsed(word_last_tap) > WORD_GESTURE_TIMEOUT) {
-        tap_fn(true);
-        word_x_accum += WORD_GESTURE_THRESHOLD;
-        word_last_tap = timer_read();
-        word_last_dir = -1;
-    }
+    step_axis(dx, WORD_GESTURE_THRESHOLD, &word_x_accum, &word_last_tap, word_nav_tap_h);
+    step_axis(dy, WORD_GESTURE_THRESHOLD, &word_y_accum, &word_last_tap, word_nav_tap_v);
 }
 
-static void word_nav_tap(bool backward) {
-    static bool cached_is_apple = false;
-    static bool cache_valid     = false;
-    if (!cache_valid) {
-        os_variant_t os = detected_host_os();
-        cached_is_apple = (os == OS_MACOS || os == OS_IOS);
-        cache_valid     = true;
+static void process_char_gesture(float dx, float dy) {
+    if (char_mode_start && timer_elapsed(char_mode_start) > 2000) {
+        char_gesture_reset();
+        char_mode_start = timer_read();
     }
-    uint16_t mod = cached_is_apple ? KC_LOPT : KC_LCTL;
-    register_code(mod);
-    tap_code(backward ? KC_LEFT : KC_RIGHT);
-    unregister_code(mod);
-}
-
-static void word_sel_tap(bool backward) {
-    select_word_tap(backward ? 'B' : 'W');
+    step_axis(dx, CHAR_GESTURE_THRESHOLD, &char_x_accum, &char_last_tap, char_nav_tap_h);
+    step_axis(dy, CHAR_GESTURE_THRESHOLD, &char_y_accum, &char_last_tap, char_nav_tap_v);
 }
 
 /* マトリクス走査 */
@@ -226,7 +293,7 @@ void matrix_init_kb(void) {
     force_cursoring     = false;
     force_key_input     = false;
     force_word_nav      = false;
-    force_word_sel      = false;
+    force_char_nav      = false;
     pressed_up_l        = false;
     pressed_up_r        = false;
     pressed_down_l      = false;
@@ -728,12 +795,15 @@ report_mouse_t pointing_device_task_combined_user(report_mouse_t left_report, re
             forced       = JOYSTICK_RIGHT;
         }
     }
-    // Word-jump and word-select gestures take priority over the regular
-    // trackball pipeline: while held, X movement drives word-level taps and
-    // the cursor stays put.
-    if (force_word_nav || force_word_sel) {
-        process_word_gesture(x_rev_l + x_rev_r,
-                             force_word_nav ? word_nav_tap : word_sel_tap);
+    // Nav gestures take priority over the regular trackball pipeline: while
+    // held, motion drives keystroke taps and the cursor stays put. Both axes
+    // are consumed so a diagonal stroke can fire horizontal + vertical taps.
+    if (force_word_nav) {
+        process_word_gesture(x_rev_l + x_rev_r, y_rev_l + y_rev_r);
+        memset(&left_report, 0, sizeof(left_report));
+        memset(&right_report, 0, sizeof(right_report));
+    } else if (force_char_nav) {
+        process_char_gesture(x_rev_l + x_rev_r, y_rev_l + y_rev_r);
         memset(&left_report, 0, sizeof(left_report));
         memset(&right_report, 0, sizeof(right_report));
     } else if (force_cursoring) {
@@ -878,13 +948,12 @@ void is_word_nav_mode(bool is_force_word_nav) {
     }
     clear_keyinput();
 }
-void is_word_sel_mode(bool is_force_word_sel) {
-    force_word_sel = is_force_word_sel;
-    if (is_force_word_sel) {
-        word_gesture_start();
+void is_char_nav_mode(bool is_force_char_nav) {
+    force_char_nav = is_force_char_nav;
+    if (is_force_char_nav) {
+        char_gesture_start();
     } else {
-        word_gesture_reset();
-        select_word_unregister();
+        char_gesture_reset();
     }
     clear_keyinput();
 }

@@ -11,13 +11,20 @@ enum TH_keycodes { CMD_CTL = QK_KB_0, UNDO, REDO, COPY, CUT, PASTE, SC_UP, SC_DO
 // so anything we want to bind from that app must live in this range. The
 // existing keymap already uses QK_USER_0..26, leaving 27..31 free.
 //
-// WORD_NAV / WORD_SEL: hold-to-engage modes that turn the trackball into a
-// horizontal word-jump (Ctrl/Opt + Left/Right) or word-selection driver
-// (getreuer select_word).
-// CWTOGG / SELWFWD / SELWBWD: tap aliases for QMK's CW_TOGG and the getreuer
-// SELECT_WORD / SELECT_WORD_BACK community keycodes.
-#define WORD_NAV QK_USER_27
-#define WORD_SEL QK_USER_28
-#define CWTOGG   QK_USER_29
-#define SELWFWD  QK_USER_30
-#define SELWBWD  QK_USER_31
+// WORD_NAV: hold to make the trackball drive context-aware word motion.
+// Horizontal stroke = word-jump back/forward, vertical stroke = line up/down.
+// The actual keystrokes depend on the active context (cycled by CTX_CYCLE):
+//   GUI  -> Ctrl/Opt + Left/Right + Up/Down
+//   TERM -> Alt + B / Alt + F + Up/Down       (readline word-jump)
+//   NVIM -> b / w + k / j                     (normal-mode motions)
+// Hold physical Shift during the gesture to get selection variants.
+// CHAR_NAV: hold to make the trackball drive bare arrow keys (per-character
+// nav). Lower threshold than word mode so small strokes register.
+// CTX_CYCLE: tap to advance WORD_NAV's context GUI -> TERM -> NVIM -> GUI.
+// SELWFWD / SELWBWD: tap aliases for the getreuer SELECT_WORD /
+// SELECT_WORD_BACK community keycodes (kept Vial-bindable).
+#define WORD_NAV  QK_USER_27
+#define CHAR_NAV  QK_USER_28
+#define CTX_CYCLE QK_USER_29
+#define SELWFWD   QK_USER_30
+#define SELWBWD   QK_USER_31

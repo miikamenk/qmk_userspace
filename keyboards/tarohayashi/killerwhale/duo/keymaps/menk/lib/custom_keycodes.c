@@ -6,7 +6,6 @@
 #include "lib/common_killerwhale.h"
 #include "custom_oled.h"
 #include "select_word.h"
-#include "caps_word.h"
 
 static uint16_t startup_timer;
 
@@ -259,29 +258,32 @@ bool process_record_addedkeycodes(uint16_t keycode, keyrecord_t *record) {
             oled_tempch(record->event.pressed, keycode);
             return false;
 
-        // Hold WORD_NAV: trackball X drives Ctrl/Opt + Left/Right (word jump).
+        // Hold WORD_NAV: trackball drives context-aware word motion.
+        // Horizontal = word jump back/forward, vertical = line up/down.
+        // Keystrokes vary by current context (cycle with CTX_CYCLE).
         case WORD_NAV:
             is_word_nav_mode(record->event.pressed);
             oled_tempch(record->event.pressed, keycode);
             return false;
 
-        // Hold WORD_SEL: trackball X drives getreuer select_word forward/back.
-        case WORD_SEL:
-            is_word_sel_mode(record->event.pressed);
+        // Hold CHAR_NAV: trackball drives bare arrow keys (per-character
+        // navigation in both axes).
+        case CHAR_NAV:
+            is_char_nav_mode(record->event.pressed);
             oled_tempch(record->event.pressed, keycode);
             return false;
 
-        // Tap aliases so the Vial-style configurator (which only enumerates
-        // QK_USER_0..31) can bind QMK's caps word toggle and the getreuer
-        // SELECT_WORD / SELECT_WORD_BACK keycodes.
-#ifdef CAPS_WORD_ENABLE
-        case CWTOGG:
+        // Tap CTX_CYCLE: advance WORD_NAV target context GUI->TERM->NVIM->GUI.
+        case CTX_CYCLE:
             if (record->event.pressed) {
-                caps_word_toggle();
+                wn_ctx_cycle();
                 oled_interrupt(keycode);
             }
             return false;
-#endif
+
+        // Tap aliases so the Vial-style configurator (which only enumerates
+        // QK_USER_0..31) can bind the getreuer SELECT_WORD / SELECT_WORD_BACK
+        // community keycodes.
         case SELWFWD:
             if (record->event.pressed) {
                 select_word_register('W');
